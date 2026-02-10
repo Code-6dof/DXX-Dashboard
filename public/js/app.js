@@ -111,8 +111,30 @@
     });
     DXXCharts.renderModeDist(modeCounts);
 
-    // Top players (from aggregate data)
-    DXXCharts.renderTopPlayers(players);
+    // Top players - recalculate from filtered games
+    const playerStatsMap = new Map();
+    filtered.forEach((g) => {
+      if (!g.players) return;
+      g.players.forEach((p) => {
+        if (!playerStatsMap.has(p.name)) {
+          playerStatsMap.set(p.name, {
+            name: p.name,
+            totalKills: 0,
+            totalDeaths: 0,
+            totalSuicides: 0,
+            gamesPlayed: 0,
+          });
+        }
+        const stats = playerStatsMap.get(p.name);
+        stats.totalKills += p.kills || 0;
+        stats.totalDeaths += p.deaths || 0;
+        stats.totalSuicides += p.suicides || 0;
+        stats.gamesPlayed++;
+      });
+    });
+    const filteredPlayers = Array.from(playerStatsMap.values())
+      .sort((a, b) => b.totalKills - a.totalKills);
+    DXXCharts.renderTopPlayers(filteredPlayers);
 
     // Top maps
     const mapCounts = {};

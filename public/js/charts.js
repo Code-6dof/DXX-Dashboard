@@ -33,14 +33,13 @@ const DXXCharts = (() => {
     const labels = Object.keys(monthCounts).sort();
     const data = labels.map((l) => monthCounts[l]);
 
-    // Format labels - show every 6 months to reduce clutter
+    // Format labels - show every other month for readability
     const formatted = labels.map((l, i) => {
-      const [y, m] = l.split("-");
-      const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-      const monthNum = parseInt(m, 10) - 1;
-      // Show label every 6 months or first/last
-      if (i === 0 || i === labels.length - 1 || monthNum % 6 === 0) {
-        return `${months[monthNum]} ${y}`;
+      if (i % 2 === 0 || i === 0 || i === labels.length - 1) {
+        const [y, m] = l.split("-");
+        const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+        const monthNum = parseInt(m, 10) - 1;
+        return `${months[monthNum]} '${y.slice(2)}`;
       }
       return "";
     });
@@ -107,7 +106,12 @@ const DXXCharts = (() => {
         scales: { 
           x: { 
             ...defaultScaleOpts,
-            ticks: { ...defaultScaleOpts.ticks, maxRotation: 45, minRotation: 45 }
+            ticks: { 
+              ...defaultScaleOpts.ticks, 
+              maxRotation: 45, 
+              minRotation: 45,
+              autoSkip: false
+            }
           }, 
           y: { ...defaultScaleOpts, beginAtZero: true } 
         },
