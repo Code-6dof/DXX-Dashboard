@@ -738,8 +738,6 @@ function writeGamelistFile() {
       gameMode: g.gameMode || 'Anarchy',
       playerCount: g.playerCount || 0,
       maxPlayers: g.maxPlayers || 8,
-      host: g.ip,
-      port: g.port,
       version: g.version || '',
       detailed: g.detailed || false,
       status: g.status || 0,
@@ -785,7 +783,7 @@ function writeGamelistFile() {
 function saveGameData(g) {
   const filename = `${g.id.replace(/[^a-z0-9]/gi, '_')}.json`;
   const filePath = path.join(CONFIG.eventsDir, filename);
-  const { _broadcasted, pendingInfoReqs, ...data } = g;
+  const { _broadcasted, pendingInfoReqs, ip, registerIp, ...data } = g;
   data.savedAt = new Date().toISOString();
   try {
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
@@ -831,7 +829,7 @@ function startWebSocketServer() {
             .map(g => ({
               id: g.id, gameName: g.gameName, mission: g.mission,
               level: g.level, playerCount: g.playerCount,
-              maxPlayers: g.maxPlayers, host: g.ip, port: g.port,
+              maxPlayers: g.maxPlayers,
               timestamp: g.timestamp,
             })),
         },
@@ -858,7 +856,7 @@ function broadcastGameUpdate(g, isNew) {
       id: g.id, gameName: g.gameName, mission: g.mission,
       level: g.level, players: g.players,
       playerCount: g.playerCount, maxPlayers: g.maxPlayers,
-      gameMode: g.gameMode, host: g.ip, port: g.port,
+      gameMode: g.gameMode,
       timestamp: g.timestamp, detailed: g.detailed || false,
       totalKills: gamelogSummary ? gamelogSummary.totalKills : 0,
       killFeed: gamelogSummary ? gamelogSummary.killFeed.slice(-10) : [],
@@ -1289,29 +1287,13 @@ function main() {
   setInterval(pollActiveGames, CONFIG.pollInterval);
   writeGamelistFile(); // Write initial (empty) file immediately
 
-  const os = require('os');
-  const nets = os.networkInterfaces();
-  const ips = [];
-  for (const n of Object.keys(nets))
-    for (const i of nets[n])
-      if (i.family === 'IPv4' && !i.internal) ips.push(i.address);
-
-  if (ips.length) {
-    console.log(`\n📡 Your IPs (other players use one of these):`);
-    ips.forEach(ip => console.log(`   ${ip}:${CONFIG.udpPort}`));
-  }
   if (CONFIG.gamelogDirs.length) {
     console.log(`\n📝 Gamelog directories:`);
     CONFIG.gamelogDirs.forEach(d => console.log(`   ${d}/gamelog.txt`));
   }
   console.log(`\n🎮 Steam launch options for DXX-Redux:`);
-  console.log(`   Local (your machine):`);
-  console.log(`     -tracker_hostaddr 127.0.0.1 -tracker_hostport ${CONFIG.udpPort}`);
-  if (ips.length) {
-    console.log(`   Remote (other players on your network):`);
-    ips.forEach(ip => console.log(`     -tracker_hostaddr ${ip} -tracker_hostport ${CONFIG.udpPort}`));
-  }
-  console.log(`\n📊 Active games: ${activeGames.size}`);
+  console.log(`   -tracker_hostaddr <YOUR_IP> -tracker_hostport ${CONFIG.udpPort}`);
+  console.log(`\n📊 Active games: ${activeGames.size}`);  
   console.log(`⏳ Waiting for game announcements… (Ctrl+C to stop)\n`);
 }
 
