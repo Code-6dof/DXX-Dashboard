@@ -159,7 +159,7 @@
       return;
     }
 
-    page.forEach((g) => {
+    page.forEach((g, idx) => {
       const winner = getWinner(g.players);
       const modeClass = g.gameType === "1v1" ? "mode-1v1" : "mode-ffa";
       const modeLabel = g.gameType === "1v1" ? "1v1" : "FFA";
@@ -170,7 +170,7 @@
       const archiveLink = g.filename ? `${ARCHIVE_BASE}/${g.filename}` : "#";
 
       tbody.innerHTML += `
-        <tr>
+        <tr class="game-row" data-game-idx="${start + idx}" style="cursor:pointer" title="Click for details">
           <td>${formatDateTime(g.timestamp)}</td>
           <td><strong>${esc(g.map)}</strong></td>
           <td><span class="mode-badge ${modeClass}">${modeLabel}</span></td>
@@ -178,8 +178,17 @@
           <td title="${esc(playerNames)}">${esc(truncatedPlayers)}</td>
           <td>${esc(g.timeElapsed || "—")}</td>
           <td>${winner ? esc(winner.name) + " <span style='color:var(--green)'>" + winner.kills + "K</span>" : "—"}</td>
-          <td><a href="${archiveLink}" target="_blank" class="ext-link" title="View on Retro Tracker">↗</a></td>
+          <td><a href="${archiveLink}" target="_blank" class="ext-link" title="View on Retro Tracker" onclick="event.stopPropagation()">↗</a></td>
         </tr>`;
+    });
+
+    // Add click handlers for game rows
+    tbody.querySelectorAll(".game-row").forEach((row) => {
+      row.addEventListener("click", () => {
+        const gameIdx = parseInt(row.dataset.gameIdx);
+        const game = filtered[gameIdx];
+        if (game && typeof GameDetail !== "undefined") GameDetail.open(game);
+      });
     });
 
     renderPagination("pagination", filtered.length, currentPage, PAGE_SIZE, (p) => {
@@ -202,7 +211,7 @@
       return;
     }
 
-    page.forEach((g) => {
+    page.forEach((g, idx) => {
       const p1 = (g.players && g.players[0]) || { name: "?", kills: 0, deaths: 0, suicides: 0 };
       const p2 = (g.players && g.players[1]) || { name: "?", kills: 0, deaths: 0, suicides: 0 };
       const p1Wins = p1.kills > p2.kills;
@@ -210,13 +219,13 @@
       const archiveLink = g.filename ? `${ARCHIVE_BASE}/${g.filename}` : "#";
 
       container.innerHTML += `
-        <div class="duel-card">
+        <div class="duel-card clickable-card" data-duel-idx="${start + idx}" title="Click for details">
           <div class="duel-header">
             <span>${formatDate(g.timestamp)}</span>
             <span class="map-name">${esc(g.map)}</span>
             <span>${esc(g.version || "")}</span>
             <span>${esc(g.timeElapsed || "")}</span>
-            <a href="${archiveLink}" target="_blank" class="ext-link" title="View on Retro Tracker">↗</a>
+            <a href="${archiveLink}" target="_blank" class="ext-link" title="View on Retro Tracker" onclick="event.stopPropagation()">↗</a>
           </div>
           <div class="duel-versus">
             <div class="duel-player ${tied ? "" : p1Wins ? "winner" : "loser"}">
@@ -232,6 +241,15 @@
             </div>
           </div>
         </div>`;
+    });
+
+    // Add click handlers for duel cards
+    container.querySelectorAll(".clickable-card").forEach((card) => {
+      card.addEventListener("click", () => {
+        const gameIdx = parseInt(card.dataset.duelIdx);
+        const game = duels[gameIdx];
+        if (game && typeof GameDetail !== "undefined") GameDetail.open(game);
+      });
     });
 
     renderPagination("duelPagination", duels.length, duelPage, CARD_PAGE_SIZE, (p) => {
@@ -257,7 +275,7 @@
 
     const medals = ["🥇", "🥈", "🥉"];
 
-    page.forEach((g) => {
+    page.forEach((g, idx) => {
       const sorted = [...(g.players || [])].sort((a, b) => b.kills - a.kills);
       const archiveLink = g.filename ? `${ARCHIVE_BASE}/${g.filename}` : "#";
 
@@ -275,17 +293,26 @@
       });
 
       container.innerHTML += `
-        <div class="ffa-card">
+        <div class="ffa-card clickable-ffa" data-ffa-idx="${start + idx}" title="Click for details">
           <div class="ffa-header">
             <span>${formatDate(g.timestamp)}</span>
             <span class="map-name">${esc(g.map)}</span>
             <span>${g.playerCount || sorted.length} players</span>
             <span>${esc(g.version || "")}</span>
             <span>${esc(g.timeElapsed || "")}</span>
-            <a href="${archiveLink}" target="_blank" class="ext-link" title="View on Retro Tracker">↗</a>
+            <a href="${archiveLink}" target="_blank" class="ext-link" title="View on Retro Tracker" onclick="event.stopPropagation()">↗</a>
           </div>
           <ol class="ffa-standings">${standingsHtml}</ol>
         </div>`;
+    });
+
+    // Add click handlers for FFA cards
+    container.querySelectorAll(".clickable-ffa").forEach((card) => {
+      card.addEventListener("click", () => {
+        const gameIdx = parseInt(card.dataset.ffaIdx);
+        const game = ffaGames[gameIdx];
+        if (game && typeof GameDetail !== "undefined") GameDetail.open(game);
+      });
     });
 
     renderPagination("ffaPagination", ffaGames.length, ffaPage, CARD_PAGE_SIZE, (p) => {

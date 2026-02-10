@@ -1,0 +1,226 @@
+{
+  "id": "sample-game",
+  "filename": "sample-gamelog.txt",
+  "timestamp": "2026-02-10T11:15:50.835Z",
+  "mission": "Wrath",
+  "level": 1,
+  "players": [
+    {
+      "name": "PlayerOne",
+      "kills": 15,
+      "deaths": 8,
+      "suicides": 1,
+      "maxKillStreak": 5,
+      "weapons": {
+        "Quad Laser": 8,
+        "Concussion Missile": 4,
+        "Fusion Cannon": 3
+      },
+      "killedBy": {
+        "PlayerTwo": 7,
+        "reactor": 1
+      },
+      "victims": {
+        "PlayerTwo": 15
+      },
+      "damageTaken": 450.5,
+      "damageDealt": 623.2
+    },
+    {
+      "name": "PlayerTwo",
+      "kills": 8,
+      "deaths": 15,
+      "suicides": 0,
+      "maxKillStreak": 3,
+      "weapons": {
+        "Homing Missile": 4,
+        "Fusion Cannon": 2,
+        "Spread Fire": 2
+      },
+      "killedBy": {
+        "PlayerOne": 15
+      },
+      "victims": {
+        "PlayerOne": 8
+      },
+      "damageTaken": 623.2,
+      "damageDealt": 450.5
+    }
+  ],
+  "killFeed": [
+    {
+      "time": "00:00:42",
+      "killer": "PlayerOne",
+      "victim": "PlayerTwo",
+      "method": "Quad Laser",
+      "message": "PlayerOne killed PlayerTwo!"
+    },
+    {
+      "time": "00:01:15",
+      "killer": "PlayerTwo",
+      "victim": "PlayerOne",
+      "method": "Homing Missile",
+      "message": "PlayerTwo killed PlayerOne!"
+    },
+    {
+      "time": "00:01:58",
+      "killer": "PlayerOne",
+      "victim": "PlayerTwo",
+      "method": "Concussion Missile",
+      "message": "PlayerOne killed PlayerTwo!"
+    },
+    {
+      "time": "00:02:33",
+      "killer": "PlayerOne",
+      "victim": "PlayerTwo",
+      "method": "Quad Laser",
+      "message": "PlayerOne killed PlayerTwo!"
+    },
+    {
+      "time": "00:03:10",
+      "killer": "PlayerTwo",
+      "victim": "PlayerOne",
+      "method": "Fusion Cannon",
+      "message": "PlayerTwo killed PlayerOne!"
+    },
+    {
+      "time": "00:03:45",
+      "killer": "PlayerOne",
+      "victim": "PlayerTwo",
+      "method": "Fusion Cannon",
+      "message": "PlayerOne killed PlayerTwo!"
+    }
+  ],
+  "killMatrix": {
+    "PlayerOne": {
+      "PlayerOne": 0,
+      "PlayerTwo": 15
+    },
+    "PlayerTwo": {
+      "PlayerOne": 8,
+      "PlayerTwo": 0
+    }
+  },
+  "damageBreakdown": [
+    {
+      "attacker": "PlayerOne",
+      "weapon": "Quad Laser",
+      "totalDamage": 312.5,
+      "hits": 45
+    },
+    {
+      "attacker": "PlayerTwo",
+      "weapon": "Homing Missile",
+      "totalDamage": 180,
+      "hits": 12
+    },
+    {
+      "attacker": "PlayerOne",
+      "weapon": "Concussion Missile",
+      "totalDamage": 155,
+      "hits": 8
+    },
+    {
+      "attacker": "PlayerTwo",
+      "weapon": "Fusion Cannon",
+      "totalDamage": 120.5,
+      "hits": 6
+    },
+    {
+      "attacker": "PlayerOne",
+      "weapon": "Fusion Cannon",
+      "totalDamage": 95,
+      "hits": 5
+    },
+    {
+      "attacker": "PlayerTwo",
+      "weapon": "Spread Fire",
+      "totalDamage": 88.3,
+      "hits": 15
+    }
+  ],
+  "timeline": [
+    {
+      "time": "00:00:02",
+      "type": "join",
+      "description": "PlayerOne is joining the game."
+    },
+    {
+      "time": "00:00:05",
+      "type": "join",
+      "description": "PlayerTwo is joining the game."
+    },
+    {
+      "time": "00:00:42",
+      "type": "kill",
+      "description": "PlayerOne killed PlayerTwo!"
+    },
+    {
+      "time": "00:01:15",
+      "type": "kill",
+      "description": "PlayerTwo killed PlayerOne!"
+    },
+    {
+      "time": "00:01:58",
+      "type": "kill",
+      "description": "PlayerOne killed PlayerTwo!"
+    },
+    {
+      "time": "00:02:33",
+      "type": "kill",
+      "description": "PlayerOne killed PlayerTwo!"
+    },
+    {
+      "time": "00:03:10",
+      "type": "kill",
+      "description": "PlayerTwo killed PlayerOne!"
+    },
+    {
+      "time": "00:03:45",
+      "type": "kill",
+      "description": "PlayerOne killed PlayerTwo!"
+    },
+    {
+      "time": "00:08:30",
+      "type": "reactor",
+      "description": "The control center has been destroyed!"
+    },
+    {
+      "time": "00:08:45",
+      "type": "escape",
+      "description": "PlayerOne has escaped!"
+    },
+    {
+      "time": "00:08:48",
+      "type": "escape",
+      "description": "PlayerTwo has escaped!"
+    }
+  ],
+  "chatLog": [
+    {
+      "time": "00:00:10",
+      "player": "PlayerOne",
+      "message": "gl hf"
+    },
+    {
+      "time": "00:00:12",
+      "player": "PlayerTwo",
+      "message": "u2"
+    },
+    {
+      "time": "00:08:50",
+      "player": "PlayerOne",
+      "message": "gg"
+    },
+    {
+      "time": "00:08:51",
+      "player": "PlayerTwo",
+      "message": "gg wp"
+    }
+  ],
+  "totalEvents": 24,
+  "totalKills": 23,
+  "totalDeaths": 24,
+  "parsedAt": "2026-02-10T11:15:50.835Z",
+  "_sample": true
+}

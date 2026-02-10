@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Game Detail — DXX Tracker</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/live.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+</head>
+<body class="live-tracker-body">
+  <!-- Navigation -->
+  <nav class="main-nav">
+    <div class="nav-inner">
+      <div class="nav-logo">
+        <span class="logo-icon">⚡</span>
+        <span>DXX Tracker</span>
+      </div>
+      <div class="nav-links">
+        <a href="index.html" class="nav-link">🟢 Live Games</a>
+        <a href="archive.html" class="nav-link">📚 Archive</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Game Detail Page -->
+  <main class="game-page" id="gamePage">
+    <!-- Back link -->
+    <div class="game-page-back">
+      <a href="index.html">← Back to Live Games</a>
+    </div>
+
+    <!-- Loading state -->
+    <div class="game-page-loading" id="gameLoading">
+      <div class="waiting-animation">
+        <div class="pulse-ring"></div>
+        <div class="pulse-ring delay-1"></div>
+        <div class="pulse-ring delay-2"></div>
+        <span class="waiting-icon">🎮</span>
+      </div>
+      <h3>Loading game…</h3>
+      <p>Fetching live game data</p>
+    </div>
+
+    <!-- Game not found state -->
+    <div class="game-page-not-found" id="gameNotFound" style="display:none">
+      <h3>😕 Game Not Found</h3>
+      <p>This game may have ended or the ID is invalid.</p>
+      <a href="index.html" class="game-page-home-link">← Return to Live Games</a>
+    </div>
+
+    <!-- Game content (populated by JS) -->
+    <div class="game-page-content" id="gameContent" style="display:none">
+      <!-- Header -->
+      <div class="game-page-header" id="gameHeader"></div>
+
+      <!-- Scoreboard -->
+      <div class="game-page-section" id="gameScoreboard">
+        <h3>📊 Scoreboard</h3>
+        <div id="scoreboardContent"></div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="gdm-tabs" id="gameTabs" style="display:none">
+        <button class="gdm-tab active" data-panel="killFeed">⚔️ Kill Feed</button>
+        <button class="gdm-tab" data-panel="killMatrix">🎯 Kill Matrix</button>
+        <button class="gdm-tab" data-panel="damage">💥 Damage</button>
+        <button class="gdm-tab" data-panel="timeline">📜 Timeline</button>
+        <button class="gdm-tab" data-panel="chat">💬 Chat</button>
+      </div>
+
+      <!-- Tab Panels -->
+      <div class="gdm-panel active" id="panel-killFeed">
+        <div class="gdm-section" id="killFeedContent"></div>
+      </div>
+      <div class="gdm-panel" id="panel-killMatrix">
+        <div class="gdm-section" id="killMatrixContent"></div>
+      </div>
+      <div class="gdm-panel" id="panel-damage">
+        <div class="gdm-section" id="damageContent"></div>
+      </div>
+      <div class="gdm-panel" id="panel-timeline">
+        <div class="gdm-section" id="timelineContent"></div>
+      </div>
+      <div class="gdm-panel" id="panel-chat">
+        <div class="gdm-section" id="chatContent"></div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <p>Real-time tracking powered by DXX-Redux gamelog monitoring</p>
+  </footer>
+
+  <script src="js/game-page.js"></script>
+</body>
+</html>

@@ -4,3 +4,5 @@ serviceAccountKey.json
 *.log
 functions/node_modules/
 .firebase/
+live-games.json
+scraper/udp-tracker.js.bak
