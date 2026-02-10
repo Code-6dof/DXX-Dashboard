@@ -10,28 +10,62 @@ const axios = require("axios");
 const pLimit = require("p-limit");
 const { parseArchiveIndex, parseGamePage } = require("./parser");
 
-const ARCHIVE_URL = process.env.ARCHIVE_URL || "https://retro-tracker.game-server.cc/archive/full.html";
+// Yearly archive URLs (2014-2026)
+const YEARLY_ARCHIVES = [
+  "https://retro.h0m3.net/archive-temp/2014.html",
+  "https://retro.h0m3.net/archive-temp/2015.html",
+  "https://retro.h0m3.net/archive-temp/2016.html",
+  "https://retro.h0m3.net/archive-temp/2017.html",
+  "https://retro.h0m3.net/archive-temp/2018.html",
+  "https://retro.h0m3.net/archive-temp/2019.html",
+  "https://retro.h0m3.net/archive-temp/2020.html",
+  "https://retro.h0m3.net/archive-temp/2021.html",
+  "https://retro.h0m3.net/archive-temp/2022.html",
+  "https://retro.h0m3.net/archive-temp/2023.html",
+  "https://retro.h0m3.net/archive-temp/2024.html",
+  "https://retro.h0m3.net/archive-temp/2025.html",
+  "https://retro-tracker.game-server.cc/archive/full.html", // 2026 current
+];
+
 const ARCHIVE_BASE = process.env.ARCHIVE_BASE_URL || "https://retro-tracker.game-server.cc/archive/";
 const CONCURRENCY = parseInt(process.env.CONCURRENCY) || 50;
 const limit = pLimit(CONCURRENCY);
 
 async function scrapeToJSON() {
-  console.log("📦 Scraping games directly to JSON file...\n");
+  console.log("📦 Scraping games directly to JSON file (2014-2026)...\n");
   
-  // 1. Fetch archive listing
-  console.log(`  📄 Fetching ${ARCHIVE_URL}`);
-  const indexRes = await axios.get(ARCHIVE_URL);
-  const allLinks = parseArchiveIndex(indexRes.data);
-  console.log(`  ✅ Found ${allLinks.length} game links\n`);
+  // 1. Fetch all yearly archive listings
+  console.log(`  📄 Fetching ${YEARLY_ARCHIVES.length} archive pages...`);
+  const allLinks = [];
+  
+  for (const archiveUrl of YEARLY_ARCHIVES) {
+    try {
+      const year = archiveUrl.match(/(\d{4})/)?.[1] || "current";
+      console.log(`    ... fetching ${year}`);
+      const indexRes = await axios.get(archiveUrl);
+      const links = parseArchiveIndex(indexRes.data);
+      
+      // Store links with their base URL for proper resolution
+      const baseUrl = archiveUrl.substring(0, archiveUrl.lastIndexOf("/") + 1);
+      const linksWithBase = links.map(link => ({ link, baseUrl }));
+      allLinks.push(...linksWithBase);
+      
+      console.log(`    ✅ ${year}: ${links.length} games`);
+    } catch (err) {
+      console.error(`    ❌ Failed to fetch ${archiveUrl}: ${err.message}`);
+    }
+  }
+  
+  console.log(`  ✅ Found ${allLinks.length} total game links\n`);
   
   // 2. Fetch all game pages
   console.log(`  🔄 Fetching ${allLinks.length} game pages (${CONCURRENCY} concurrent)...`);
   let fetched = 0;
   const games = [];
   
-  const tasks = allLinks.map((link) =>
+  const tasks = allLinks.map(({ link, baseUrl }) =>
     limit(async () => {
-      const url = `${ARCHIVE_BASE}/${link}`;
+      const url = `${baseUrl}${link}`;
       try {
         const res = await axios.get(url);
         const game = parseGamePage(res.data, link);

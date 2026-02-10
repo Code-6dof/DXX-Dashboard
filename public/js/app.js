@@ -14,14 +14,14 @@
   let currentPage = 1;
   let duelPage = 1;
   let ffaPage = 1;
-  const PAGE_SIZE = 50;
-  const CARD_PAGE_SIZE = 30;
+  const PAGE_SIZE = 100;
+  const CARD_PAGE_SIZE = 50;
 
   const ARCHIVE_BASE = "https://retro-tracker.game-server.cc/archive";
 
   // ── Load Data from JSON file ───────────────────────────────────
   async function loadGames() {
-    const response = await fetch("/data/games.json");
+    const response = await fetch("./data/games.json");
     const data = await response.json();
     games = data.games;
     players = data.players;
@@ -67,7 +67,9 @@
 
   // ── Render Stats Bar ───────────────────────────────────────────
   function renderStatsBar(filtered) {
-    document.getElementById("totalGames").textContent = filtered.length.toLocaleString();
+    const totalGamesEl = document.getElementById("totalGames");
+    totalGamesEl.textContent = filtered.length.toLocaleString();
+    totalGamesEl.title = `${filtered.length} games`;
 
     const uniquePlayers = new Set();
     let totalKills = 0;
@@ -447,6 +449,17 @@
   try {
     await Promise.all([loadGames(), loadPlayers()]);
     DXXFilters.setData(games, players);
+    
+    // Display dataset info
+    if (games.length > 0) {
+      const oldest = games[games.length - 1];
+      const newest = games[0];
+      const startDate = formatDate(oldest.timestamp);
+      const endDate = formatDate(newest.timestamp);
+      document.getElementById("datasetInfo").innerHTML = 
+        `📅 Dataset: ${startDate} to ${endDate} (${games.length.toLocaleString()} games)`;
+    }
+    
     switchView("all");
 
     console.log(`DXX Dashboard loaded: ${games.length} games, ${players.length} players.`);

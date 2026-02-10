@@ -26,18 +26,30 @@ const DXXCharts = (() => {
   Chart.defaults.color = C.dimText;
   Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
 
-  /** Games Over Time — area line chart by month. */
+  /** Games Over Time — area line chart by month with trend line. */
   function renderGamesOverTime(monthCounts) {
     const ctx = document.getElementById("gamesOverTimeChart");
     if (!ctx) return;
     const labels = Object.keys(monthCounts).sort();
     const data = labels.map((l) => monthCounts[l]);
 
-    // Format labels as "Jan 2025"
-    const formatted = labels.map((l) => {
+    // Format labels - show every 6 months to reduce clutter
+    const formatted = labels.map((l, i) => {
       const [y, m] = l.split("-");
       const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-      return `${months[parseInt(m, 10) - 1]} ${y}`;
+      const monthNum = parseInt(m, 10) - 1;
+      // Show label every 6 months or first/last
+      if (i === 0 || i === labels.length - 1 || monthNum % 6 === 0) {
+        return `${months[monthNum]} ${y}`;
+      }
+      return "";
+    });
+
+    // Calculate 12-month moving average
+    const movingAvg = data.map((val, idx) => {
+      const start = Math.max(0, idx - 11);
+      const slice = data.slice(start, idx + 1);
+      return slice.reduce((a, b) => a + b, 0) / slice.length;
     });
 
     if (gamesOverTimeChart) gamesOverTimeChart.destroy();
@@ -47,15 +59,26 @@ const DXXCharts = (() => {
         labels: formatted,
         datasets: [
           {
-            label: "Games",
+            label: "Games per Month",
             data,
             borderColor: C.accent,
             backgroundColor: "rgba(0,229,255,0.08)",
             fill: true,
             tension: 0.35,
-            pointRadius: 2,
+            pointRadius: 0,
             pointHoverRadius: 5,
             borderWidth: 2,
+          },
+          {
+            label: "12-Month Average",
+            data: movingAvg,
+            borderColor: C.gold,
+            backgroundColor: "transparent",
+            fill: false,
+            tension: 0.35,
+            pointRadius: 0,
+            borderWidth: 2,
+            borderDash: [5, 5],
           },
         ],
       },
@@ -63,16 +86,43 @@ const DXXCharts = (() => {
         responsive: true,
         maintainAspectRatio: false,
         interaction: { intersect: false, mode: "index" },
-        plugins: { legend: { display: false } },
-        scales: { x: defaultScaleOpts, y: { ...defaultScaleOpts, beginAtZero: true } },
+        plugins: { 
+          legend: { 
+            display: true,
+            position: "top",
+            align: "end",
+            labels: { color: C.dimText, padding: 12, usePointStyle: true, pointStyleWidth: 12 }
+          },
+          tooltip: {
+            callbacks: {
+              title: (items) => {
+                const idx = items[0].dataIndex;
+                const [y, m] = labels[idx].split("-");
+                const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+                return `${months[parseInt(m, 10) - 1]} ${y}`;
+              }
+            }
+          }
+        },
+        scales: { 
+          x: { 
+            ...defaultScaleOpts,
+            ticks: { ...defaultScaleOpts.ticks, maxRotation: 45, minRotation: 45 }
+          }, 
+          y: { ...defaultScaleOpts, beginAtZero: true } 
+        },
       },
     });
   }
 
-  /** Mode distribution — doughnut. */
+  /** Mode distribution — doughnut with percentage labels. */
   function renderModeDist(modeCounts) {
     const ctx = document.getElementById("modeDistChart");
     if (!ctx) return;
+    const duelCount = modeCounts["1v1"] || 0;
+    const ffaCount = modeCounts["ffa"] || 0;
+    const total = duelCount + ffaCount;
+    
     if (modeDistChart) modeDistChart.destroy();
     modeDistChart = new Chart(ctx, {
       type: "doughnut",
@@ -80,7 +130,7 @@ const DXXCharts = (() => {
         labels: ["1v1 Duels", "Free-For-All"],
         datasets: [
           {
-            data: [modeCounts["1v1"] || 0, modeCounts["ffa"] || 0],
+            data: [duelCount, ffaCount],
             backgroundColor: [C.red, C.green],
             borderWidth: 0,
             hoverOffset: 8,
@@ -96,28 +146,46 @@ const DXXCharts = (() => {
             position: "bottom",
             labels: { color: C.dimText, padding: 16, usePointStyle: true, pointStyleWidth: 12 },
           },
+          tooltip: {
+            callbacks: {
+              label: (context) => {
+                const value = context.parsed;
+                const percentage = ((value / total) * 100).toFixed(1);
+                return `${context.label}: ${value.toLocaleString()} (${percentage}%)`;
+              }
+            }
+          }
         },
       },
     });
   }
 
-  /** Top 20 players — horizontal bar chart. */
+  /** Top 30 players — horizontal bar chart with gradient. */
   function renderTopPlayers(players) {
     const ctx = document.getElementById("topPlayersChart");
     if (!ctx) return;
-    const top = players.slice(0, 20);
+    const top = players.slice(0, 30);
+    
+    // Create gradient colors for top players
+    const gradientColors = top.map((_, i) => {
+      if (i === 0) return C.gold; // #1
+      if (i === 1) return "#c0c0c0"; // #2 silver
+      if (i === 2) return "#cd7f32"; // #3 bronze
+      return C.accent;
+    });
+    
     if (topPlayersChart) topPlayersChart.destroy();
     topPlayersChart = new Chart(ctx, {
       type: "bar",
       data: {
-        labels: top.map((p) => p.name),
+        labels: top.map((p, i) => `#${i + 1} ${p.name}`),
         datasets: [
           {
             label: "Total Kills",
             data: top.map((p) => p.totalKills || 0),
-            backgroundColor: C.accent,
+            backgroundColor: gradientColors,
             borderRadius: 3,
-            barThickness: 16,
+            barThickness: 14,
           },
         ],
       },
@@ -125,23 +193,43 @@ const DXXCharts = (() => {
         indexAxis: "y",
         responsive: true,
         maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
+        plugins: { 
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              title: (items) => {
+                const idx = items[0].dataIndex;
+                return top[idx].name;
+              },
+              label: (context) => {
+                const p = top[context.dataIndex];
+                const kd = p.totalDeaths > 0 ? (p.totalKills / p.totalDeaths).toFixed(2) : p.totalKills;
+                return [
+                  `Kills: ${p.totalKills.toLocaleString()}`,
+                  `Deaths: ${p.totalDeaths.toLocaleString()}`,
+                  `K/D: ${kd}`,
+                  `Games: ${p.gamesPlayed.toLocaleString()}`
+                ];
+              }
+            }
+          }
+        },
         scales: {
           x: { ...defaultScaleOpts, beginAtZero: true },
-          y: { ...defaultScaleOpts, ticks: { ...defaultScaleOpts.ticks, font: { size: 11 } } },
+          y: { ...defaultScaleOpts, ticks: { ...defaultScaleOpts.ticks, font: { size: 10 } } },
         },
       },
     });
   }
 
-  /** Top maps — horizontal bar chart. */
+  /** Top 20 maps — horizontal bar chart with game counts. */
   function renderTopMaps(mapCounts) {
     const ctx = document.getElementById("topMapsChart");
     if (!ctx) return;
-    // Sort by count descending, take top 15
+    // Sort by count descending, take top 20
     const sorted = Object.entries(mapCounts)
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 15);
+      .slice(0, 20);
 
     if (topMapsChart) topMapsChart.destroy();
     topMapsChart = new Chart(ctx, {
@@ -162,10 +250,17 @@ const DXXCharts = (() => {
         indexAxis: "y",
         responsive: true,
         maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
+        plugins: { 
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (context) => `${context.parsed.x.toLocaleString()} games`
+            }
+          }
+        },
         scales: {
           x: { ...defaultScaleOpts, beginAtZero: true },
-          y: defaultScaleOpts,
+          y: { ...defaultScaleOpts, ticks: { ...defaultScaleOpts.ticks, font: { size: 10 } } },
         },
       },
     });

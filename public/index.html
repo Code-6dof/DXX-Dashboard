@@ -8,8 +8,6 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 </head>
 <body>
   <!-- ───── Header / Hero ───── -->
@@ -20,6 +18,7 @@
         <h1>DXX Dashboard</h1>
       </div>
       <p class="subtitle">Descent Multiplayer — Every Frag, Every Game</p>
+      <p class="dataset-info" id="datasetInfo" style="margin: 0.5rem 0; color: var(--text-dim); font-size: 0.9rem;"></p>
       <div class="stats-bar" id="statsBar">
         <div class="stat">
           <span id="totalGames" class="stat-num">—</span>
@@ -71,19 +70,19 @@
   <!-- ───── Charts ───── -->
   <section class="charts-section" id="chartsSection">
     <div class="chart-card">
-      <h3>Games Over Time</h3>
+      <h3>Games Over Time (2014-2026)</h3>
       <canvas id="gamesOverTimeChart"></canvas>
     </div>
     <div class="chart-card">
-      <h3>Mode Distribution</h3>
+      <h3>Game Mode Distribution</h3>
       <canvas id="modeDistChart"></canvas>
     </div>
     <div class="chart-card wide">
-      <h3>Top 20 Players by Kills</h3>
+      <h3>Top 30 Players by Total Kills</h3>
       <canvas id="topPlayersChart"></canvas>
     </div>
     <div class="chart-card">
-      <h3>Most Played Maps</h3>
+      <h3>Top 20 Most Played Maps</h3>
       <canvas id="topMapsChart"></canvas>
     </div>
   </section>
@@ -159,10 +158,9 @@
 
   <!-- ───── Footer ───── -->
   <footer>
-    <p>Data sourced from <a href="https://retro-tracker.game-server.cc/archive/full.html" target="_blank">Retro Tracker</a> by Arch • Hosting by PuDLeZ • Built with Firebase &amp; Chart.js</p>
+    <p>Data sourced from <a href="https://retro-tracker.game-server.cc/archive/full.html" target="_blank">Retro Tracker</a> by Arch • Hosting by PuDLeZ • Built with Chart.js</p>
   </footer>
 
-  <script src="js/firebase-init.js"></script>
   <script src="js/charts.js"></script>
   <script src="js/filters.js"></script>
   <script src="js/app.js"></script>
