@@ -1,0 +1,24 @@
+{
+  "name": "dxx-dashboard",
+  "version": "1.0.0",
+  "description": "Dashboard for DXX Retro Tracker game archive data",
+  "main": "scraper/index.js",
+  "scripts": {
+    "scrape": "node scraper/index.js",
+    "scrape:watch": "node scraper/index.js --watch",
+    "deploy": "firebase deploy",
+    "serve": "firebase emulators:start",
+    "start": "npx http-server public -p 8080 -c-1"
+  },
+  "dependencies": {
+    "axios": "^1.6.7",
+    "cheerio": "^1.0.0-rc.12",
+    "dotenv": "^16.4.1",
+    "firebase-admin": "^12.0.0",
+    "node-cron": "^3.0.3",
+    "p-limit": "^3.1.0"
+  },
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  }
+}
