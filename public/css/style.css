@@ -221,6 +221,30 @@ a:hover { opacity: 0.8; }
 }
 .btn-secondary:hover { border-color: var(--text-dim); color: var(--text); }
 
+.btn-load-more {
+  background: linear-gradient(135deg, var(--accent-dim) 0%, var(--blue) 100%);
+  color: var(--text);
+  border: 1px solid var(--border-light);
+  padding: 0.4rem 1rem;
+  border-radius: var(--radius-pill);
+  font-family: var(--font);
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.3s;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+.btn-load-more:hover {
+  background: linear-gradient(135deg, var(--blue) 0%, var(--accent) 100%);
+  box-shadow: 0 4px 16px rgba(0,229,255,0.3);
+  transform: translateY(-1px);
+}
+.btn-load-more:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
 /* ── Charts ── */
 .charts-section {
   display: grid;
