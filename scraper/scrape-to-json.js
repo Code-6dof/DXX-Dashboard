@@ -138,10 +138,12 @@ async function scrapeToJSON() {
   
   const outputPath = path.join(__dirname, "..", "public", "data", "games.json");
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  fs.writeFileSync(outputPath, JSON.stringify(output, null, 2));
+  
+  // Write minified JSON (no whitespace) for faster loading
+  fs.writeFileSync(outputPath, JSON.stringify(output));
   
   const sizeMB = (fs.statSync(outputPath).size / 1024 / 1024).toFixed(2);
-  console.log(`  ✅ Exported to public/data/games.json`);
+  console.log(`  ✅ Exported to public/data/games.json (minified)`);
   console.log(`  📊 ${games.length} games, ${players.length} players`);
   console.log(`  💾 File size: ${sizeMB} MB\n`);
   

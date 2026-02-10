@@ -21,10 +21,27 @@
 
   // ── Load Data from JSON file ───────────────────────────────────
   async function loadGames() {
+    const progressEl = document.getElementById("loadingProgress");
+    const textEl = document.getElementById("loadingText");
+    
+    progressEl.textContent = "Downloading data...";
     const response = await fetch("./data/games.json");
+    
+    // Show file size
+    const contentLength = response.headers.get('content-length');
+    if (contentLength) {
+      const sizeMB = (parseInt(contentLength) / 1024 / 1024).toFixed(1);
+      progressEl.textContent = `Downloading ${sizeMB} MB...`;
+    }
+    
+    textEl.textContent = "Parsing game data...";
+    progressEl.textContent = "This may take a few seconds...";
+    
     const data = await response.json();
     games = data.games;
     players = data.players;
+    
+    progressEl.textContent = `Loaded ${games.length.toLocaleString()} games!`;
     return games;
   }
 
