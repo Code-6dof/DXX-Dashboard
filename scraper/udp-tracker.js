@@ -1297,15 +1297,20 @@ function main() {
       if (i.family === 'IPv4' && !i.internal) ips.push(i.address);
 
   if (ips.length) {
-    console.log(`\n📡 LAN IPs:`);
+    console.log(`\n📡 Your IPs (other players use one of these):`);
     ips.forEach(ip => console.log(`   ${ip}:${CONFIG.udpPort}`));
   }
   if (CONFIG.gamelogDirs.length) {
     console.log(`\n📝 Gamelog directories:`);
     CONFIG.gamelogDirs.forEach(d => console.log(`   ${d}/gamelog.txt`));
   }
-  console.log(`\n🎮 Configure DXX-Redux with:`);
-  console.log(`   -tracker_hostaddr 127.0.0.1 -tracker_hostport ${CONFIG.udpPort}`);
+  console.log(`\n🎮 Steam launch options for DXX-Redux:`);
+  console.log(`   Local (your machine):`);
+  console.log(`     -tracker_hostaddr 127.0.0.1 -tracker_hostport ${CONFIG.udpPort}`);
+  if (ips.length) {
+    console.log(`   Remote (other players on your network):`);
+    ips.forEach(ip => console.log(`     -tracker_hostaddr ${ip} -tracker_hostport ${CONFIG.udpPort}`));
+  }
   console.log(`\n📊 Active games: ${activeGames.size}`);
   console.log(`⏳ Waiting for game announcements… (Ctrl+C to stop)\n`);
 }
