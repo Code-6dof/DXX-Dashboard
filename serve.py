@@ -24,6 +24,7 @@ class CORSRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
 
 if __name__ == '__main__':
+    socketserver.TCPServer.allow_reuse_address = True
     with socketserver.TCPServer(("", PORT), CORSRequestHandler) as httpd:
         print(f" Server running at http://localhost:{PORT}/")
         print(f" Serving directory: {DIRECTORY}")

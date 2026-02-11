@@ -94,15 +94,21 @@ info "Restarting services on VM..."
 ssh $SSH_OPTS "${VM_USER}@${VM_HOST}" bash -s <<'REMOTE'
   cd /home/ubuntu/DXX-Dashboard
 
-  # Kill old serve.py and restart
-  pkill -f 'python3 serve.py' 2>/dev/null || true
-  sleep 0.5
+  # Kill old serve.py and wait for port to free
+  pkill -9 -f 'python3 serve.py' 2>/dev/null || true
+  for i in 1 2 3 4 5; do
+    ss -tlnp | grep -q ':8080' || break
+    sleep 1
+  done
   nohup python3 serve.py > /dev/null 2>&1 &
   echo "  ✓ serve.py restarted (PID $!)"
 
-  # Kill old tracker and restart
-  pkill -f 'node scraper/udp-tracker.js' 2>/dev/null || true
-  sleep 0.5
+  # Kill old tracker and wait for port to free
+  pkill -9 -f 'node scraper/udp-tracker.js' 2>/dev/null || true
+  for i in 1 2 3 4 5; do
+    ss -ulnp | grep -q ':9999' || break
+    sleep 1
+  done
   nohup node scraper/udp-tracker.js > tracker.log 2>&1 &
   echo "  ✓ udp-tracker.js restarted (PID $!)"
 
