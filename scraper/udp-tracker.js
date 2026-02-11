@@ -865,8 +865,50 @@ function archiveGameToHistory(g) {
     const sanitizedName = (topPlayer.name || 'unknown').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
     const sanitizedMap = (g.missionName || g.mission || 'unknown').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
 
+    const gameId = `game-${dateStr}-${sanitizedName}-${sanitizedMap}`;
+
+    // ── Snapshot the gamelog data BEFORE it gets reset ──
+    const summary = clientGamelogs.size > 0 ? getMergedGamelogSummary() : gamelogSummary;
+
+    // Build enriched player data by merging UDP stats + gamelog stats
+    const enrichedPlayers = g.players.map(p => {
+      const kills = p.kills || 0;
+      const deaths = p.deaths || 0;
+      const base = {
+        name: p.name || 'Unknown',
+        kills,
+        deaths,
+        suicides: p.suicides || 0,
+        kdRatio: deaths > 0 ? +(kills / deaths).toFixed(2) : kills,
+        timeInGame: '',
+        color: p.color || 0,
+        score: p.score || 0,
+      };
+
+      // Merge rich gamelog stats if available
+      if (summary && summary.players) {
+        const lp = summary.players.find(
+          sp => sp.name.toLowerCase() === (p.name || '').toLowerCase()
+        );
+        if (lp) {
+          base.kills = Math.max(base.kills, lp.kills || 0);
+          base.deaths = Math.max(base.deaths, lp.deaths || 0);
+          base.suicides = Math.max(base.suicides, lp.suicides || 0);
+          base.kdRatio = base.deaths > 0 ? +(base.kills / base.deaths).toFixed(2) : base.kills;
+          if (lp.maxKillStreak) base.maxKillStreak = lp.maxKillStreak;
+          if (lp.weapons) base.weapons = lp.weapons;
+          if (lp.killedBy) base.killedBy = lp.killedBy;
+          if (lp.victims) base.victims = lp.victims;
+          if (lp.damageDealt) base.damageDealt = lp.damageDealt;
+          if (lp.damageTaken) base.damageTaken = lp.damageTaken;
+        }
+      }
+
+      return base;
+    });
+
     const gameEntry = {
-      id: `game-${dateStr}-${sanitizedName}-${sanitizedMap}`,
+      id: gameId,
       filename: `live-${g.id || 'unknown'}`,
       timestamp: g.timestamp || now.toISOString(),
       gameName: g.gameName || 'Unnamed Game',
@@ -881,35 +923,71 @@ function archiveGameToHistory(g) {
       killGoal: '',
       reactorLife: '',
       maxTime: '',
-      players: g.players.map(p => {
-        const kills = p.kills || 0;
-        const deaths = p.deaths || 0;
-        return {
-          name: p.name || 'Unknown',
-          kills,
-          deaths,
-          suicides: p.suicides || 0,
-          kdRatio: deaths > 0 ? +(kills / deaths).toFixed(2) : kills,
-          timeInGame: '',
-          color: p.color || 0,
-          score: p.score || 0,
-        };
-      }),
+      players: enrichedPlayers,
       playerCount: g.playerCount || g.players.length,
       gameType: (g.playerCount || g.players.length) === 2 ? '1v1' :
                 (g.playerCount || g.players.length) > 2 ? 'FFA' : 'Unknown',
       disallowedItems: [],
     };
 
-    // Include kill matrix if available
+    // Include kill matrix (prefer UDP packet data, fallback to gamelog)
     if (g.killMatrix) {
       gameEntry.killMatrix = g.killMatrix;
+    } else if (summary && summary.killMatrix) {
+      gameEntry.killMatrix = summary.killMatrix;
     }
 
-    // Append to games.json
+    // ── Save full event file for game detail view ──
+    if (summary && (summary.totalKills > 0 || summary.totalEvents > 0)) {
+      const eventData = {
+        id: gameId,
+        filename: gameEntry.filename,
+        timestamp: gameEntry.timestamp,
+        gameName: gameEntry.gameName,
+        mission: gameEntry.mission,
+        map: gameEntry.map,
+        mode: gameEntry.mode,
+        level: gameEntry.levelNumber,
+        players: enrichedPlayers,
+        killFeed: summary.killFeed || [],
+        killMatrix: gameEntry.killMatrix || summary.killMatrix || {},
+        damageBreakdown: summary.damageBreakdown || [],
+        timeline: summary.timeline || [],
+        chatLog: summary.chatLog || [],
+        totalKills: summary.totalKills || 0,
+        totalDeaths: summary.totalDeaths || 0,
+        totalEvents: summary.totalEvents || 0,
+        parsedAt: now.toISOString(),
+        clientCount: 1 + clientGamelogs.size,
+      };
+
+      const eventPath = path.join(CONFIG.eventsDir, `${gameId}.json`);
+      try {
+        fs.writeFileSync(eventPath, JSON.stringify(eventData, null, 2));
+        console.log(`   📋 Saved event data → ${gameId}.json`);
+        updateEventsIndex(eventData);
+      } catch (evErr) {
+        console.error(`   ⚠️ Event save error: ${evErr.message}`);
+      }
+    }
+
+    // ── Append to games.json ──
     if (fs.existsSync(CONFIG.gamesJsonFile)) {
       const raw = fs.readFileSync(CONFIG.gamesJsonFile, 'utf8');
       const data = JSON.parse(raw);
+
+      // Deduplicate: don't archive the same game twice
+      const isDuplicate = data.games.some(existing =>
+        existing.timestamp === gameEntry.timestamp &&
+        existing.gameName === gameEntry.gameName &&
+        existing.players.length === gameEntry.players.length
+      );
+
+      if (isDuplicate) {
+        console.log(`   ⏭️  Skipping duplicate archive for "${g.gameName}"`);
+        return;
+      }
+
       data.games.unshift(gameEntry);
       data.totalGames = data.games.length;
       data.exportDate = now.toISOString();
@@ -927,13 +1005,51 @@ function archiveGameToHistory(g) {
         totalGames: 1,
         totalPlayers: gameEntry.players.length,
         games: [gameEntry],
-        players: {},
+        players: [],
       };
       fs.writeFileSync(CONFIG.gamesJsonFile, JSON.stringify(data));
       console.log(`   📦 Created games.json with first archived game`);
     }
   } catch (err) {
     console.error(`   ❌ Archive error: ${err.message}`);
+  }
+}
+
+// ── Update the events/index.json for the game detail page ───────
+function updateEventsIndex(eventData) {
+  const indexPath = path.join(CONFIG.eventsDir, 'index.json');
+  let index = { lastUpdated: new Date().toISOString(), totalGames: 0, games: [] };
+
+  if (fs.existsSync(indexPath)) {
+    try {
+      index = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
+    } catch (e) { /* start fresh */ }
+  }
+
+  // Deduplicate
+  index.games = index.games.filter(g => g.id !== eventData.id);
+
+  index.games.unshift({
+    id: eventData.id,
+    timestamp: eventData.timestamp,
+    gameName: eventData.gameName || '',
+    mission: eventData.mission,
+    map: eventData.map || '',
+    mode: eventData.mode || '',
+    level: eventData.level,
+    playerCount: eventData.players.length,
+    playerNames: eventData.players.map(p => p.name),
+    totalKills: eventData.totalKills,
+    totalEvents: eventData.totalEvents,
+  });
+
+  index.totalGames = index.games.length;
+  index.lastUpdated = new Date().toISOString();
+
+  try {
+    fs.writeFileSync(indexPath, JSON.stringify(index, null, 2));
+  } catch (e) {
+    console.error(`   ⚠️ Events index error: ${e.message}`);
   }
 }
 
