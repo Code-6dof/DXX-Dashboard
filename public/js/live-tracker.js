@@ -10,7 +10,7 @@
   'use strict';
 
   // ── Configuration ──
-  const POLL_URL = 'http://129.80.20.218:8080/data/live-games.json';
+  const POLL_URL = 'https://turns-extension-neighbor-front.trycloudflare.com/data/live-games.json';
   const POLL_INTERVAL = 5000; // 5 seconds, same as PyTracker
   const MAX_RECENT_GAMES = 10;
 

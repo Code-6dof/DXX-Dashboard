@@ -40,6 +40,7 @@ const CONFIG = {
   wsPort: parseInt(process.env.WS_PORT) || 8081,
   eventsDir: path.resolve(__dirname, '../public/data/events'),
   liveGamesFile: path.resolve(__dirname, '../public/data/live-games.json'),
+  gamesJsonFile: path.resolve(__dirname, '../public/data/games.json'),
   gameTimeout: 300000,      // 5 min — consider game dead
   cleanupInterval: 60000,   // Check for dead games every minute
   pollInterval: 5000,       // Poll games for stats every 5 seconds
@@ -537,16 +538,68 @@ function parseGameInfoFull(packet, g) {
       if (maxPlayers > 0) g.maxPlayers = maxPlayers;
     }
 
-    // Merge gamelog stats if available
-    if (gamelogSummary && gamelogSummary.players.length > 0) {
-      for (const p of players) {
-        const logPlayer = gamelogSummary.players.find(
-          lp => lp.name.toLowerCase() === p.name.toLowerCase()
-        );
-        if (logPlayer) {
-          p.kills = logPlayer.kills;
-          p.deaths = logPlayer.deaths;
-          p.suicides = logPlayer.suicides;
+    // ── Extract kill matrix & per-player stats from packet data ──
+    // DXX-Redux packet layout (offsets relative to settingsStart):
+    //   +62: game_flags(1), team_vector(1)
+    //   +64: AllowedItems(4), Allow_marker_view(2), AlwaysLighting(2)
+    //   +72: ShowEnemyNames(2), BrightPlayers(2), spawn_invul_pad(2)
+    //   +78: team_name(2×9=18)
+    //   +96: locations(8×4=32)
+    //  +128: kills[8][8] (8×8 × INT16LE = 128 bytes)
+    //  +256: segments_checksum(2), team_kills(2×2=4)
+    //  +262: killed[8] (8 × INT16LE = 16 bytes)  — total deaths
+    //  +278: player_kills[8] (8 × INT16LE = 16)   — total kills
+    //  +294: KillGoal(4), PlayTimeAllowed(4), level_time(4),
+    //         control_invul_time(4), monitor_vector(4)
+    //  +314: player_score[8] (8 × INT32LE = 32 bytes)
+    const killMatrixOff   = settingsStart + 128;
+    const killedOff       = settingsStart + 262;
+    const playerKillsOff  = settingsStart + 278;
+    const playerScoreOff  = settingsStart + 314;
+
+    if (packet.length >= playerScoreOff + MAX_PLAYERS * 4) {
+      const killMatrix = [];
+      for (let i = 0; i < MAX_PLAYERS; i++) {
+        killMatrix[i] = [];
+        for (let j = 0; j < MAX_PLAYERS; j++) {
+          killMatrix[i][j] = packet.readInt16LE(killMatrixOff + (i * MAX_PLAYERS + j) * 2);
+        }
+      }
+
+      const killed = [], playerKills = [], playerScores = [];
+      for (let i = 0; i < MAX_PLAYERS; i++) {
+        killed[i]       = packet.readInt16LE(killedOff + i * 2);
+        playerKills[i]  = packet.readInt16LE(playerKillsOff + i * 2);
+        playerScores[i] = packet.readInt32LE(playerScoreOff + i * 4);
+      }
+
+      g.killMatrix    = killMatrix;
+      g.playerScores  = playerScores;
+
+      // Packet data is the authoritative source for scores
+      for (let i = 0; i < players.length; i++) {
+        players[i].kills    = playerKills[i] || 0;
+        players[i].deaths   = killed[i] || 0;
+        players[i].suicides = killMatrix[i][i] || 0;
+        players[i].score    = playerScores[i] || 0;
+      }
+
+      const hasKills = playerKills.some(k => k > 0);
+      if (hasKills) {
+        console.log(`   📊 Kill matrix: ${players.map((p, i) => `${p.name}:${playerKills[i]}k/${killed[i]}d`).join(', ')}`);
+      }
+    } else {
+      // Fallback: merge gamelog stats if kill matrix not available
+      if (gamelogSummary && gamelogSummary.players.length > 0) {
+        for (const p of players) {
+          const logPlayer = gamelogSummary.players.find(
+            lp => lp.name.toLowerCase() === p.name.toLowerCase()
+          );
+          if (logPlayer) {
+            p.kills = logPlayer.kills;
+            p.deaths = logPlayer.deaths;
+            p.suicides = logPlayer.suicides;
+          }
         }
       }
     }
@@ -578,6 +631,7 @@ function handleUnregister(packet, rinfo) {
   // game port, so we match by game_id + IP rather than ip:port.
   for (const [key, g] of activeGames) {
     if (g.gameId === gameId && g.ip === rinfo.address) {
+      archiveGameToHistory(g);
       console.log(`   Removed: "${g.gameName}"`);
       activeGames.delete(key);
       broadcastGameRemoval(key);
@@ -749,7 +803,9 @@ function writeGamelistFile() {
         kills: p.kills || 0,
         deaths: p.deaths || 0,
         suicides: p.suicides || 0,
+        score: p.score || 0,
       })),
+      killMatrix: g.killMatrix || null,
     });
   }
 
@@ -792,6 +848,95 @@ function saveGameData(g) {
   }
 }
 
+// ── Archive concluded game to games.json history ────────────────
+function archiveGameToHistory(g) {
+  if (!g || !g.confirmed || !g.players || g.players.length === 0) {
+    return; // Only archive confirmed games with players
+  }
+
+  try {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const dateStr = `${pad(now.getMonth()+1)}-${pad(now.getDate())}-${now.getFullYear()}-${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+
+    // Find top player by kills for the ID
+    const topPlayer = g.players.reduce((best, p) =>
+      (p.kills || 0) > (best.kills || 0) ? p : best, g.players[0]);
+    const sanitizedName = (topPlayer.name || 'unknown').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const sanitizedMap = (g.missionName || g.mission || 'unknown').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+
+    const gameEntry = {
+      id: `game-${dateStr}-${sanitizedName}-${sanitizedMap}`,
+      filename: `live-${g.id || 'unknown'}`,
+      timestamp: g.timestamp || now.toISOString(),
+      gameName: g.gameName || 'Unnamed Game',
+      map: g.missionName || g.mission || 'Unknown',
+      mission: g.mission || 'Unknown',
+      levelNumber: g.level || 1,
+      playersSlots: `${g.playerCount || g.players.length}/${g.maxPlayers || 8}`,
+      mode: g.gameMode || 'Anarchy',
+      version: g.version === 1 ? 'D1X' : g.version === 2 ? 'D2X' : `v${g.releaseMajor || 0}.${g.releaseMinor || 0}.${g.releaseMicro || 0}`,
+      difficulty: ['Trainee', 'Rookie', 'Hotshot', 'Ace', 'Insane'][g.difficulty] || 'Unknown',
+      timeElapsed: '',
+      killGoal: '',
+      reactorLife: '',
+      maxTime: '',
+      players: g.players.map(p => {
+        const kills = p.kills || 0;
+        const deaths = p.deaths || 0;
+        return {
+          name: p.name || 'Unknown',
+          kills,
+          deaths,
+          suicides: p.suicides || 0,
+          kdRatio: deaths > 0 ? +(kills / deaths).toFixed(2) : kills,
+          timeInGame: '',
+          color: p.color || 0,
+          score: p.score || 0,
+        };
+      }),
+      playerCount: g.playerCount || g.players.length,
+      gameType: (g.playerCount || g.players.length) === 2 ? '1v1' :
+                (g.playerCount || g.players.length) > 2 ? 'FFA' : 'Unknown',
+      disallowedItems: [],
+    };
+
+    // Include kill matrix if available
+    if (g.killMatrix) {
+      gameEntry.killMatrix = g.killMatrix;
+    }
+
+    // Append to games.json
+    if (fs.existsSync(CONFIG.gamesJsonFile)) {
+      const raw = fs.readFileSync(CONFIG.gamesJsonFile, 'utf8');
+      const data = JSON.parse(raw);
+      data.games.unshift(gameEntry);
+      data.totalGames = data.games.length;
+      data.exportDate = now.toISOString();
+
+      // Write to temp file first, then rename for atomicity
+      const tmpFile = CONFIG.gamesJsonFile + '.tmp';
+      fs.writeFileSync(tmpFile, JSON.stringify(data));
+      fs.renameSync(tmpFile, CONFIG.gamesJsonFile);
+
+      console.log(`   📦 Archived "${g.gameName}" to games.json (${data.totalGames} total)`);
+    } else {
+      // Create new games.json
+      const data = {
+        exportDate: now.toISOString(),
+        totalGames: 1,
+        totalPlayers: gameEntry.players.length,
+        games: [gameEntry],
+        players: {},
+      };
+      fs.writeFileSync(CONFIG.gamesJsonFile, JSON.stringify(data));
+      console.log(`   📦 Created games.json with first archived game`);
+    }
+  } catch (err) {
+    console.error(`   ❌ Archive error: ${err.message}`);
+  }
+}
+
 function cleanupDeadGames() {
   const now = Date.now();
   const dead = [];
@@ -802,6 +947,7 @@ function cleanupDeadGames() {
     console.log(`\n🧹 Cleaning up ${dead.length} inactive game(s)`);
     dead.forEach(id => {
       const g = activeGames.get(id);
+      archiveGameToHistory(g);
       console.log(`   Removed: ${g.gameName}`);
       activeGames.delete(id);
       broadcastGameRemoval(id);

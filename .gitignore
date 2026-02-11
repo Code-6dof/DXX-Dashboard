@@ -6,3 +6,6 @@ functions/node_modules/
 .firebase/
 live-games.json
 scraper/udp-tracker.js.bak
+cloudflared-linux-amd64
+*.tmp
+public/data/live-games.json

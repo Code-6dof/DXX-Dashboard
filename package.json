@@ -7,9 +7,9 @@
     "scrape": "node scraper/index.js",
     "scrape:watch": "node scraper/index.js --watch",
     "scrape:json": "node scraper/scrape-to-json.js",
-    "deploy": "firebase deploy",
-    "serve": "firebase emulators:start",
-    "start": "npx http-server public -p 8080 -c-1"
+    "deploy": "./deploy.sh",
+    "start": "npx http-server public -p 8080 -c-1",
+    "tracker": "node scraper/udp-tracker.js"
   },
   "dependencies": {
     "axios": "^1.6.7",
