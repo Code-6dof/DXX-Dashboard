@@ -22,7 +22,7 @@ const os = require('os');
 
 // Configuration
 const CONFIG = {
-  serverUrl: 'http://localhost:9998',
+  serverUrl: 'http://192.210.140.94:9998',
   gamelogPath: null,
   checkInterval: 1000,
   uploadEndpoint: '/api/gamelog/append',
@@ -62,7 +62,7 @@ function parseArguments() {
         console.log('Usage: node gamelog-uploader.js [options]');
         console.log('');
         console.log('Options:');
-        console.log('  --server URL     Server URL (default: http://localhost:9998)');
+        console.log('  --server URL     Server URL (default: http://192.210.140.94:9998)');
         console.log('  --gamelog PATH   Path to gamelog.txt (auto-detected if not specified)');
         console.log('  --player NAME    Your player name (auto-detected if not specified)');
         console.log('  --interval MS    Check interval in milliseconds (default: 1000)');

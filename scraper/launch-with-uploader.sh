@@ -3,7 +3,7 @@
 # Place this script in your game directory and run it instead of d2x-rebirth directly
 
 # Configuration
-TRACKER_SERVER="http://localhost:9998"
+TRACKER_SERVER="http://192.210.140.94:9998"
 GAME_BINARY="d2x-rebirth"
 UPLOADER_SCRIPT="gamelog-uploader.js"
 

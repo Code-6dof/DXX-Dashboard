@@ -3,7 +3,7 @@ REM DXX-Redux Game Launcher with Gamelog Uploader
 REM Place this script in your game directory and run it instead of d2x-rebirth.exe directly
 
 REM Configuration
-set TRACKER_SERVER=http://localhost:9998
+set TRACKER_SERVER=http://192.210.140.94:9998
 set GAME_BINARY=d2x-rebirth.exe
 set UPLOADER_SCRIPT=gamelog-uploader.js
 
