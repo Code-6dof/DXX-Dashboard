@@ -26,8 +26,9 @@
   // ── DOM Elements ──
   const loadingEl   = document.getElementById('gameLoading');
   const notFoundEl  = document.getElementById('gameNotFound');
-  const contentEl   = document.getElementById('gameContent');
-  const headerEl    = document.getElementById('gameHeader');
+  const contentEl   = document.getElementById('gameContent');  const loadingTitle = document.getElementById('gameLoadingTitle');
+  const loadingMessage = document.getElementById('gameLoadingMessage');
+  const loadingProgress = document.getElementById('gameLoadingProgress');  const headerEl    = document.getElementById('gameHeader');
   const scoreboardEl = document.getElementById('scoreboardContent');
   const killFeedEl  = document.getElementById('killFeedContent');
   const killMatrixEl = document.getElementById('killMatrixContent');
@@ -63,9 +64,19 @@
   // ── Load Archive Game ──
   async function loadArchiveGame() {
     try {
+      console.log('Loading from archive...');
+      loadingTitle.textContent = 'Loading from archive...';
+      loadingMessage.textContent = 'Downloading game archive';
+      loadingProgress.textContent = 'This may take a moment for large archives';
+      
       const resp = await fetch(ARCHIVE_URL + '?t=' + Date.now());
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      
+      loadingMessage.textContent = 'Parsing game data...';
       const data = await resp.json();
+      
+      loadingMessage.textContent = 'Searching for game...';
+      loadingProgress.textContent = `Searching ${data.games.length.toLocaleString()} archived games`;
       
       // Try multiple matching strategies
       let game = data.games.find(g => g.id === gameId);
@@ -104,6 +115,9 @@
   // ── Poll Loop ──
   async function poll() {
     try {
+      loadingMessage.textContent = 'Checking live games...';
+      loadingProgress.textContent = `Poll ${missedPolls + 1}`;
+      
       const resp = await fetch(POLL_URL + '?t=' + Date.now());
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 

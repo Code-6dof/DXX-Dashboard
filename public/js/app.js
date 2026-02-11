@@ -49,13 +49,70 @@
 
   // ── Load Data from JSON file ───────────────────────────────────
   async function loadGames() {
-    const response = await fetch("./data/games.json");
-    const data = await response.json();
-    allGames = data.games; // Store full dataset
-    games = data.games.slice(0, INITIAL_LOAD); // Load only 200 initially
-    players = data.players;
-    console.log(`Loaded ${games.length} of ${allGames.length} games initially (fast start)`);
-    return games;
+    const progressText = document.getElementById('loadingProgress');
+    const loadingTextEl = document.getElementById('loadingText');
+    
+    try {
+      // Fetch with progress tracking
+      loadingTextEl.textContent = 'Downloading game data...';
+      const response = await fetch("./data/games.json");
+      
+      // Get total size if available
+      const contentLength = response.headers.get('Content-Length');
+      const total = contentLength ? parseInt(contentLength, 10) : 0;
+      
+      if (!response.body) {
+        // Fallback if no streaming support
+        const data = await response.json();
+        allGames = data.games;
+        games = data.games.slice(0, INITIAL_LOAD);
+        players = data.players;
+        return games;
+      }
+      
+      // Stream response with progress
+      const reader = response.body.getReader();
+      const chunks = [];
+      let loaded = 0;
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        chunks.push(value);
+        loaded += value.length;
+        
+        if (total > 0) {
+          const percent = Math.round((loaded / total) * 100);
+          const mb = (loaded / 1024 / 1024).toFixed(1);
+          const totalMb = (total / 1024 / 1024).toFixed(1);
+          progressText.textContent = `${mb} MB / ${totalMb} MB (${percent}%)`;
+        } else {
+          const mb = (loaded / 1024 / 1024).toFixed(1);
+          progressText.textContent = `${mb} MB downloaded`;
+        }
+      }
+      
+      // Combine chunks and parse
+      loadingTextEl.textContent = 'Processing game data...';
+      progressText.textContent = 'Parsing JSON...';
+      
+      const blob = new Blob(chunks);
+      const text = await blob.text();
+      const data = JSON.parse(text);
+      
+      allGames = data.games; // Store full dataset
+      games = data.games.slice(0, INITIAL_LOAD); // Load only 200 initially
+      players = data.players;
+      
+      progressText.textContent = `Loading ${games.length} of ${allGames.length} games for fast display`;
+      console.log(`Loaded ${games.length} of ${allGames.length} games initially (fast start)`);
+      return games;
+      
+    } catch (err) {
+      console.error('Error loading games:', err);
+      throw err;
+    }
   }
 
   // ── Progressive Loading ───────────────────────────────────────
