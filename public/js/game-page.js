@@ -1,9 +1,9 @@
 /**
- * DXX Dashboard — Game Page v1.0
+ * DXX Dashboard — Game Page v2.0
  *
- * Standalone game detail page. Polls /data/live-games.json every 5s
- * to get live game data. Updates the scoreboard and event panels
- * in-place without page reloads.
+ * Standalone game detail page. Can show:
+ * 1. Live games (polls /data/live-games.json)
+ * 2. Archive games (loads from /data/games.json by ID)
  *
  * URL: game.html?id=GAME_ID
  */
@@ -12,6 +12,7 @@
 
   // ── Configuration ──
   const POLL_URL = 'data/live-games.json';
+  const ARCHIVE_URL = 'data/games.json';
   const POLL_INTERVAL = 15000; // 15s idle refresh
 
   // ── State ──
@@ -20,6 +21,7 @@
   let pollTimer = null;
   let missedPolls = 0; // track how many polls without finding the game
   const MAX_MISSED = 12; // 12 × 3s = 36s before showing "not found"
+  let isArchiveGame = false; // flag to distinguish archive vs live
 
   // ── DOM Elements ──
   const loadingEl   = document.getElementById('gameLoading');
@@ -58,6 +60,31 @@
 
   document.title = `Game — DXX Tracker`;
 
+  // ── Load Archive Game ──
+  async function loadArchiveGame() {
+    try {
+      const resp = await fetch(ARCHIVE_URL + '?t=' + Date.now());
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      
+      // Find game by ID
+      const game = data.games.find(g => g.id === gameId);
+      if (!game) {
+        loadingEl.style.display = 'none';
+        notFoundEl.style.display = 'block';
+        return;
+      }
+
+      isArchiveGame = true;
+      currentGame = game;
+      render(game);
+    } catch (e) {
+      console.error('Failed to load archive game:', e);
+      loadingEl.style.display = 'none';
+      notFoundEl.style.display = 'block';
+    }
+  }
+
   // ── Poll Loop ──
   async function poll() {
     try {
@@ -75,16 +102,15 @@
       if (!game) {
         missedPolls++;
         if (missedPolls >= MAX_MISSED && !currentGame) {
-          // Never found this game
-          loadingEl.style.display = 'none';
-          notFoundEl.style.display = 'block';
-          contentEl.style.display = 'none';
+          // Not a live game, try loading from archive
           clearInterval(pollTimer);
+          await loadArchiveGame();
         }
         return;
       }
 
       missedPolls = 0;
+      isArchiveGame = false;
 
       // Merge gamelog stats into player data
       if (data.gamelog && data.gamelog.players) {
@@ -163,19 +189,25 @@
       chatEl.innerHTML = renderChatLog(game.chatLog || []);
     } else {
       tabsEl.style.display = 'none';
-      killFeedEl.innerHTML = `
-        <div class="gamelog-status-notice">
-          <h4>Live Event Feed</h4>
-          <p>No gamelog events yet. Events (kills, deaths, chat) appear here <strong>in real-time</strong> as they happen during the game.</p>
-          <details>
-            <summary>Not seeing events?</summary>
-            <ul>
-              <li>The tracker watches <code>~/.d1x-redux/gamelog.txt</code> and <code>~/.d2x-redux/gamelog.txt</code></li>
-              <li>DXX-Redux writes to gamelog.txt as you play</li>
-              <li>Make sure the tracker (<code>node scraper/udp-tracker.js</code>) is running</li>
-            </ul>
-          </details>
-        </div>`;
+      const noEventMessage = isArchiveGame 
+        ? `<div class="gamelog-status-notice">
+             <h4>No Event Data</h4>
+             <p>This archived match doesn't have detailed event data (kill feed, timeline, chat).</p>
+             <p>Only matches tracked with the local gamelog watcher have full event details.</p>
+           </div>`
+        : `<div class="gamelog-status-notice">
+             <h4>Live Event Feed</h4>
+             <p>No gamelog events yet. Events (kills, deaths, chat) appear here <strong>in real-time</strong> as they happen during the game.</p>
+             <details>
+               <summary>Not seeing events?</summary>
+               <ul>
+                 <li>The tracker watches <code>~/.d1x-redux/gamelog.txt</code> and <code>~/.d2x-redux/gamelog.txt</code></li>
+                 <li>DXX-Redux writes to gamelog.txt as you play</li>
+                 <li>Make sure the tracker (<code>node scraper/udp-tracker.js</code>) is running</li>
+               </ul>
+             </details>
+           </div>`;
+      killFeedEl.innerHTML = noEventMessage;
     }
   }
 
@@ -183,6 +215,9 @@
   function renderHeader(game) {
     const modeClass = (game.players || []).length === 2 ? 'mode-1v1' : 'mode-ffa';
     const modeLabel = (game.players || []).length === 2 ? '1v1 Duel' : 'Free-For-All';
+    const statusBadge = isArchiveGame 
+      ? '<span class="archive-badge" style="background:var(--text-muted);color:var(--bg);padding:0.3rem 0.6rem;border-radius:4px;font-size:0.8rem;font-weight:700">ARCHIVE</span>'
+      : '<span class="live-badge">LIVE</span>';
 
     headerEl.innerHTML = `
       <div class="game-page-title-row">
@@ -196,7 +231,7 @@
             ${game.host ? `<span class="game-page-meta-item">${esc(game.host)}:${game.port}</span>` : ''}
           </div>
         </div>
-        <span class="live-badge">LIVE</span>
+        ${statusBadge}
       </div>`;
   }
 

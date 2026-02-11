@@ -24,6 +24,29 @@
 
   const ARCHIVE_BASE = "https://retro-tracker.game-server.cc/archive";
 
+  // ── Generate unique game ID ────────────────────────────────────
+  function generateGameId(game, index) {
+    // Return existing ID if present
+    if (game.id) return game.id;
+    
+    // Generate from timestamp + first player name
+    const ts = new Date(game.timestamp).getTime();
+    const player = game.players && game.players[0] ? game.players[0].name : 'unknown';
+    const hash = (ts + player).split('').reduce((a, c) => ((a << 5) - a) + c.charCodeAt(0) | 0, 0);
+    const base62 = Math.abs(hash).toString(36);
+    return `g${base62}${index.toString(36)}`;
+  }
+
+  // Ensure all games have IDs
+  function ensureGameIds() {
+    allGames.forEach((g, i) => {
+      if (!g.id) g.id = generateGameId(g, i);
+    });
+    games.forEach((g, i) => {
+      if (!g.id) g.id = generateGameId(g, i);
+    });
+  }
+
   // ── Load Data from JSON file ───────────────────────────────────
   async function loadGames() {
     const response = await fetch("./data/games.json");
@@ -204,13 +227,17 @@
       const versionLabel = g.version || "—";
       const playerNames = g.players ? g.players.map((p) => p.name).join(", ") : "";
       const truncatedPlayers = playerNames.length > 45 ? playerNames.slice(0, 45) + "…" : playerNames;
-      const archiveLink = g.filename ? `${ARCHIVE_BASE}/${g.filename}` : "#";
+      
+      // Determine if this is a local match or has retro tracker link
+      const hasRetroLink = !!g.filename;
+      const archiveLink = hasRetroLink ? `${ARCHIVE_BASE}/${g.filename}` : null;
+      const gameUrl = `game.html?id=${encodeURIComponent(g.id)}`;
 
       const tr = document.createElement('tr');
       tr.className = 'game-row';
       tr.dataset.gameIdx = start + idx;
       tr.style.cursor = 'pointer';
-      tr.title = 'Click for details';
+      tr.title = hasRetroLink ? 'Click to view match details' : 'Click to view match details (locally tracked)';
       tr.innerHTML = `
           <td>${formatDateTime(g.timestamp)}</td>
           <td><strong>${esc(g.map)}</strong></td>
@@ -219,10 +246,13 @@
           <td title="${esc(playerNames)}">${esc(truncatedPlayers)}</td>
           <td>${esc(g.timeElapsed || "—")}</td>
           <td>${winner ? esc(winner.name) + " <span style='color:var(--green)'>" + winner.kills + "K</span>" : "—"}</td>
-          <td><a href="${archiveLink}" target="_blank" class="ext-link" title="View on Retro Tracker" onclick="event.stopPropagation()">↗</a></td>`;
+          <td>
+            ${hasRetroLink 
+              ? `<a href="${archiveLink}" target="_blank" class="ext-link" title="View on Retro Tracker" onclick="event.stopPropagation()">↗</a>` 
+              : `<span style="color:var(--text-muted);font-size:0.75rem" title="Locally tracked match">Local</span>`}
+          </td>`;
       tr.addEventListener("click", () => {
-        const game = filtered[start + idx];
-        if (game && typeof GameDetail !== "undefined") GameDetail.open(game);
+        window.location.href = gameUrl;
       });
       fragment.appendChild(tr);
     });
@@ -254,19 +284,23 @@
       const p2 = (g.players && g.players[1]) || { name: "?", kills: 0, deaths: 0, suicides: 0 };
       const p1Wins = p1.kills > p2.kills;
       const tied = p1.kills === p2.kills;
-      const archiveLink = g.filename ? `${ARCHIVE_BASE}/${g.filename}` : "#";
+      const hasRetroLink = !!g.filename;
+      const archiveLink = hasRetroLink ? `${ARCHIVE_BASE}/${g.filename}` : null;
+      const gameUrl = `game.html?id=${encodeURIComponent(g.id)}`;
 
       const div = document.createElement('div');
       div.className = 'duel-card clickable-card';
       div.dataset.duelIdx = start + idx;
-      div.title = 'Click for details';
+      div.title = hasRetroLink ? 'Click to view match' : 'Click to view match (locally tracked)';
       div.innerHTML = `
           <div class="duel-header">
             <span>${formatDate(g.timestamp)}</span>
             <span class="map-name">${esc(g.map)}</span>
             <span>${esc(g.version || "")}</span>
             <span>${esc(g.timeElapsed || "")}</span>
-            <a href="${archiveLink}" target="_blank" class="ext-link" title="View on Retro Tracker" onclick="event.stopPropagation()">↗</a>
+            ${hasRetroLink 
+              ? `<a href="${archiveLink}" target="_blank" class="ext-link" title="View on Retro Tracker" onclick="event.stopPropagation()">↗</a>`
+              : `<span style="color:var(--text-muted);font-size:0.7rem">Local</span>`}
           </div>
           <div class="duel-versus">
             <div class="duel-player ${tied ? "" : p1Wins ? "winner" : "loser"}">
@@ -282,8 +316,7 @@
             </div>
           </div>`;
       div.addEventListener("click", () => {
-        const game = duels[start + idx];
-        if (game && typeof GameDetail !== "undefined") GameDetail.open(game);
+        window.location.href = gameUrl;
       });
       fragment.appendChild(div);
     });
@@ -315,7 +348,9 @@
 
     page.forEach((g, idx) => {
       const sorted = [...(g.players || [])].sort((a, b) => b.kills - a.kills);
-      const archiveLink = g.filename ? `${ARCHIVE_BASE}/${g.filename}` : "#";
+      const hasRetroLink = !!g.filename;
+      const archiveLink = hasRetroLink ? `${ARCHIVE_BASE}/${g.filename}` : null;
+      const gameUrl = `game.html?id=${encodeURIComponent(g.id)}`;
 
       let standingsHtml = "";
       sorted.forEach((p, i) => {
@@ -333,7 +368,7 @@
       const div = document.createElement('div');
       div.className = 'ffa-card clickable-ffa';
       div.dataset.ffaIdx = start + idx;
-      div.title = 'Click for details';
+      div.title = hasRetroLink ? 'Click to view match' : 'Click to view match (locally tracked)';
       div.innerHTML = `
           <div class="ffa-header">
             <span>${formatDate(g.timestamp)}</span>
@@ -341,12 +376,13 @@
             <span>${g.playerCount || sorted.length} players</span>
             <span>${esc(g.version || "")}</span>
             <span>${esc(g.timeElapsed || "")}</span>
-            <a href="${archiveLink}" target="_blank" class="ext-link" title="View on Retro Tracker" onclick="event.stopPropagation()">↗</a>
+            ${hasRetroLink
+              ? `<a href="${archiveLink}" target="_blank" class="ext-link" title="View on Retro Tracker" onclick="event.stopPropagation()">↗</a>`
+              : `<span style="color:var(--text-muted);font-size:0.7rem">Local</span>`}
           </div>
           <ol class="ffa-standings">${standingsHtml}</ol>`;
       div.addEventListener("click", () => {
-        const game = ffaGames[start + idx];
-        if (game && typeof GameDetail !== "undefined") GameDetail.open(game);
+        window.location.href = gameUrl;
       });
       fragment.appendChild(div);
     });
@@ -562,6 +598,7 @@
 
   try {
     await Promise.all([loadGames(), loadPlayers()]);
+    ensureGameIds(); // Generate IDs for all games
     DXXFilters.setData(games, players);
     
     // Display dataset info
