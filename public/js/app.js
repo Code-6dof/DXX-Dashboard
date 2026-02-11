@@ -613,13 +613,18 @@
   // Load more button
   const loadMoreBtn = document.createElement('button');
   loadMoreBtn.id = 'loadMoreBtn';
-  loadMoreBtn.textContent = `Load More Games (${games.length}/${allGames.length} loaded)`;
+  const updateLoadMoreText = () => {
+    const total = gameMeta ? gameMeta.totalGames : '?';
+    loadMoreBtn.textContent = `Load More Games (${games.length.toLocaleString()}/${typeof total === 'number' ? total.toLocaleString() : total} loaded)`;
+  };
+  updateLoadMoreText();
   loadMoreBtn.style.cssText = 'margin: 2rem auto; display: block; padding: 1rem 2rem; background: var(--accent); color: white; border: none; cursor: pointer; font-size: 1rem; border-radius: 4px;';
-  loadMoreBtn.addEventListener('click', () => {
-    if (loadMoreGames()) {
-      loadMoreBtn.textContent = `Load More Games (${games.length}/${allGames.length} loaded)`;
+  loadMoreBtn.addEventListener('click', async () => {
+    const loaded = await loadMoreGames();
+    if (loaded) {
+      updateLoadMoreText();
       refresh();
-      if (games.length >= allGames.length) {
+      if (gameMeta && games.length >= gameMeta.totalGames) {
         loadMoreBtn.textContent = 'All games loaded';
         loadMoreBtn.disabled = true;
         loadMoreBtn.style.opacity = '0.5';
@@ -629,7 +634,7 @@
   
   // Insert button after stats bar
   const statsBar = document.querySelector('.stats-bar');
-  if (statsBar && games.length < allGames.length) {
+  if (statsBar && gameMeta && games.length < gameMeta.totalGames) {
     statsBar.parentNode.insertBefore(loadMoreBtn, statsBar.nextSibling);
   }
 
