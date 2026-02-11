@@ -21,12 +21,12 @@ async function rebuildPlayerStats() {
   console.log("🔄 Rebuilding player stats from all games...");
   
   // Clear existing player stats
-  console.log("  🗑️  Clearing existing player stats...");
+  console.log("    Clearing existing player stats...");
   const playersSnap = await db.collection("players").get();
   const deleteBatch = db.batch();
   playersSnap.docs.forEach((doc) => deleteBatch.delete(doc.ref));
   await deleteBatch.commit();
-  console.log(`  ✅ Deleted ${playersSnap.size} player records.`);
+  console.log(`   Deleted ${playersSnap.size} player records.`);
 
   // Stream all games and rebuild stats
   const playerStats = new Map();
@@ -34,7 +34,7 @@ async function rebuildPlayerStats() {
   const gamesRef = db.collection("games");
   const snapshot = await gamesRef.get();
   
-  console.log(`  📊 Processing ${snapshot.size} games...`);
+  console.log(`   Processing ${snapshot.size} games...`);
   
   snapshot.docs.forEach((doc) => {
     const game = doc.data();
@@ -93,7 +93,7 @@ async function rebuildPlayerStats() {
     await new Promise((r) => setTimeout(r, 100));
   }
 
-  console.log("  ✅ Player stats rebuild complete!\n");
+  console.log("   Player stats rebuild complete!\n");
   process.exit(0);
 }
 

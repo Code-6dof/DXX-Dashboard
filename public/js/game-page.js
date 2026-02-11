@@ -217,13 +217,13 @@
       return `
         <div class="gdm-duel-scoreboard">
           <div class="gdm-duel-player ${tied ? '' : p1Wins ? 'winner' : 'loser'}">
-            <div class="gdm-duel-name">${p1Wins && !tied ? '🏆 ' : ''}${esc(p1.name)}</div>
+            <div class="gdm-duel-name">${p1Wins && !tied ? '' : ''}${esc(p1.name)}</div>
             <div class="gdm-duel-score">${p1.kills || 0}</div>
             <div class="gdm-duel-sub">${p1.deaths || 0}D · ${p1.suicides || 0}S</div>
           </div>
           <div class="gdm-duel-divider">VS</div>
           <div class="gdm-duel-player ${tied ? '' : !p1Wins ? 'winner' : 'loser'}">
-            <div class="gdm-duel-name">${!p1Wins && !tied ? '🏆 ' : ''}${esc(p2.name)}</div>
+            <div class="gdm-duel-name">${!p1Wins && !tied ? '' : ''}${esc(p2.name)}</div>
             <div class="gdm-duel-score">${p2.kills || 0}</div>
             <div class="gdm-duel-sub">${p2.deaths || 0}D · ${p2.suicides || 0}S</div>
           </div>
@@ -272,12 +272,12 @@
 
     const items = killFeed.map(k => {
       const timeStr = k.time ? `<span class="kf-time">${esc(typeof k.time === 'string' ? k.time : '')}</span>` : '';
-      let icon = '💀';
+      let icon = '';
       if (k.method && k.method.toLowerCase().includes('mine')) icon = '💣';
       if (k.method && k.method.toLowerCase().includes('missile')) icon = '🚀';
-      if (k.method && k.method.toLowerCase().includes('fusion')) icon = '⚡';
+      if (k.method && k.method.toLowerCase().includes('fusion')) icon = '';
       if (k.method && k.method.toLowerCase().includes('laser')) icon = '🔫';
-      if (k.killer === k.victim || !k.killer) icon = '☠️';
+      if (k.killer === k.victim || !k.killer) icon = '';
 
       return `
         <div class="kf-entry">
@@ -290,7 +290,7 @@
 
     return `
       <div class="gdm-kill-feed-header">
-        <span>⚔️ Kill Feed</span>
+        <span> Kill Feed</span>
         <span class="kf-count">${killFeed.length} kills</span>
       </div>
       <div class="gdm-kill-feed">${items}</div>`;
@@ -366,12 +366,12 @@
     }
 
     const typeIcons = {
-      kill: '⚔️', death: '💀', suicide: '☠️',
-      join: '📥', leave: '📤', disconnect: '📤',
+      kill: '', death: '', suicide: '',
+      join: '', leave: '', disconnect: '',
       reactor: '💥', escape: '🚀', chat: '💬',
       flag: '🚩', orb: '🔮', damage: '💢',
       promotion: '⬆️', demotion: '⬇️',
-      start: '🎮', end: '🏁',
+      start: '🎮', end: '',
     };
 
     const items = timeline.map(ev => {
@@ -387,7 +387,7 @@
 
     return `
       <div class="gdm-timeline-header">
-        <span>📜 Event Timeline</span>
+        <span> Event Timeline</span>
         <span class="tl-count">${timeline.length} events</span>
       </div>
       <div class="gdm-timeline">${items}</div>`;
@@ -433,7 +433,7 @@
 
   // ── Start ──
   function init() {
-    console.log(`🎮 DXX Game Page v1.0 — Game ID: ${gameId}`);
+    console.log(`DXX Game Page v1.0 — Game ID: ${gameId}`);
     setupTabs();
     poll(); // First poll immediately
     pollTimer = setInterval(poll, POLL_INTERVAL);

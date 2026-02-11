@@ -163,7 +163,7 @@ async function scrape() {
   console.log(`  🆕 ${newLinks.length} new game(s) to fetch.`);
 
   if (newLinks.length === 0) {
-    console.log("  ✅ Everything up to date.\n");
+    console.log("   Everything up to date.\n");
     return;
   }
 
@@ -193,7 +193,7 @@ async function scrape() {
   );
 
   await Promise.all(tasks);
-  console.log(`  📊 Successfully parsed ${newGames.length} games (${failed} failures).`);
+  console.log(`   Successfully parsed ${newGames.length} games (${failed} failures).`);
 
   if (newGames.length === 0) return;
 
@@ -250,7 +250,7 @@ async function scrape() {
   }
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-  console.log(`  ✅ Done in ${elapsed}s — ingested ${newGames.length} new games.\n`);
+  console.log(`   Done in ${elapsed}s — ingested ${newGames.length} new games.\n`);
 }
 
 // ── Entry Point ───────────────────────────────────────────────

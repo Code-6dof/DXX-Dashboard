@@ -146,7 +146,7 @@ function processGamelog(filePath) {
     // Update cache
     processedFiles.set(filePath, { mtime: stat.mtimeMs, size: stat.size });
 
-    console.log(`  ✅ ${summary.totalKills} kills, ${summary.players.length} players, ${summary.timeline.length} events`);
+    console.log(`   ${summary.totalKills} kills, ${summary.players.length} players, ${summary.timeline.length} events`);
 
     return gameEvent;
   } catch (err) {
@@ -197,7 +197,7 @@ function writeEventIndex() {
     })),
   };
   fs.writeFileSync(indexPath, JSON.stringify(index, null, 2));
-  console.log(`\n📋 Event index updated: ${allGameEvents.length} games`);
+  console.log(`\n Event index updated: ${allGameEvents.length} games`);
 }
 
 // ── File System Watcher ─────────────────────────────────────────
@@ -294,7 +294,7 @@ function startWebSocket() {
 
     console.log(`🔌 WebSocket server on port ${CONFIG.wsPort}`);
   } catch (e) {
-    console.log('⚠️  WebSocket disabled (install ws package for live feed: npm i ws)');
+    console.log('  WebSocket disabled (install ws package for live feed: npm i ws)');
   }
 }
 
@@ -306,7 +306,7 @@ function main() {
   console.log('╚══════════════════════════════════════════╝\n');
 
   if (CONFIG.gamelogDirs.length === 0) {
-    console.log('⚠️  No gamelog directories found!');
+    console.log('  No gamelog directories found!');
     console.log('');
     console.log('Set GAMELOG_DIR to your DXX-Redux data directory:');
     console.log('  Linux:   export GAMELOG_DIR=~/.d1x-redux:~/.d2x-redux');
@@ -342,7 +342,7 @@ function main() {
   // Start WebSocket if configured
   startWebSocket();
 
-  console.log('\n🎮 Waiting for new game events... (Ctrl+C to stop)\n');
+  console.log('\n Waiting for new game events... (Ctrl+C to stop)\n');
 }
 
 // ── Write a sample event for testing ────────────────────────────

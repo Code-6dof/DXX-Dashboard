@@ -106,7 +106,7 @@ function startUDPServer() {
 
   server.on('message', (msg, rinfo) => {
     try {
-      console.log(`\n📦 Packet from ${rinfo.address}:${rinfo.port} | ${msg.length} bytes | opcode=${msg[0]}`);
+      console.log(`\n Packet from ${rinfo.address}:${rinfo.port} | ${msg.length} bytes | opcode=${msg[0]}`);
       console.log(`   Hex: ${msg.toString('hex')}`);
       handlePacket(msg, rinfo);
     } catch (err) {
@@ -121,7 +121,7 @@ function startUDPServer() {
 
   server.on('listening', () => {
     const a = server.address();
-    console.log(`🎯 Tracker listening on ${a.address}:${a.port}`);
+    console.log(` Tracker listening on ${a.address}:${a.port}`);
   });
 
   server.bind(CONFIG.udpPort);
@@ -140,24 +140,24 @@ function handlePacket(packet, rinfo) {
 
     case OP.UNREGISTER_OR_VDENY: // 1
       if (packet.length === 5) {
-        console.log('   🗑️  UNREGISTER');
+        console.log('     UNREGISTER');
         handleUnregister(packet, rinfo);
       } else if (packet.length === 9) {
         console.log('   🔒 VERSION DENY');
         handleVersionDeny(packet, rinfo);
       } else {
-        console.log(`   ⚠️  Opcode 1 unexpected length: ${packet.length}`);
+        console.log(`     Opcode 1 unexpected length: ${packet.length}`);
       }
       break;
 
     case OP.GAME_LIST_REQUEST: // 2
-      console.log('   📋 GAME LIST REQUEST');
+      console.log('    GAME LIST REQUEST');
       handleGameListRequest(packet, rinfo);
       break;
 
     case OP.GAME_INFO_RESPONSE: // 3
     case OP.GAME_INFO_LITE:     // 5
-      console.log(`   📊 GAME INFO (opcode ${opcode}, ${packet.length} bytes)`);
+      console.log(`    GAME INFO (opcode ${opcode}, ${packet.length} bytes)`);
       handleGameInfoResponse(packet, rinfo);
       break;
 
@@ -179,7 +179,7 @@ function handlePacket(packet, rinfo) {
 // ═══════════════════════════════════════════════════════════════
 function handleRegister(packet, rinfo) {
   if (packet.length !== 14 && packet.length !== 15) {
-    console.log(`   ⚠️  Register: bad length ${packet.length} (expected 14 or 15)`);
+    console.log(`     Register: bad length ${packet.length} (expected 14 or 15)`);
     return;
   }
 
@@ -196,7 +196,7 @@ function handleRegister(packet, rinfo) {
   console.log(`   ${vStr} v${relMajor}.${relMinor}.${relMicro} | port=${gamePort} | gameId=${gameId} | trackerVer=${trackerVer}`);
 
   if (gamePort < 1024) {
-    console.log('   ⚠️  Port < 1024, dropping');
+    console.log('     Port < 1024, dropping');
     return;
   }
 
@@ -206,7 +206,7 @@ function handleRegister(packet, rinfo) {
 
   // Duplicate with different game_id? Mark old one stale.
   if (existing && existing.gameId !== gameId) {
-    console.log(`   ⚠️  Game ID changed (${existing.gameId} → ${gameId}), resetting`);
+    console.log(`     Game ID changed (${existing.gameId} → ${gameId}), resetting`);
     activeGames.delete(key);
   }
 
@@ -241,9 +241,9 @@ function handleRegister(packet, rinfo) {
   activeGames.set(key, g);
 
   if (isNew) {
-    console.log(`   ✅ Game registered: ${key}`);
+    console.log(`    Game registered: ${key}`);
   } else {
-    console.log(`   ✅ Game re-registered: ${key}`);
+    console.log(`    Game re-registered: ${key}`);
   }
 
   // Immediately ask the game for details (opcode 4 → game responds with opcode 5)
@@ -268,7 +268,7 @@ function sendGameInfoLiteReq(g) {
   server.send(buf, g.port, g.ip, (err) => {
     if (err) console.error(`   ❌ game_info_lite_req error: ${err.message}`);
     else {
-      console.log(`   📤 Sent game_info_lite_req to ${g.ip}:${g.port}`);
+      console.log(`    Sent game_info_lite_req to ${g.ip}:${g.port}`);
       g.pendingInfoReqs++;
     }
   });
@@ -296,7 +296,7 @@ function sendGameInfoFullReq(g) {
   server.send(buf, g.port, g.ip, (err) => {
     if (err) console.error(`   ❌ game_info_full_req error: ${err.message}`);
     else {
-      console.log(`   📤 Sent game_info_full_req (proto=${proto}) to ${g.ip}:${g.port}`);
+      console.log(`    Sent game_info_full_req (proto=${proto}) to ${g.ip}:${g.port}`);
       g.pendingInfoReqs++;
     }
   });
@@ -315,7 +315,7 @@ function sendRegisterAck(g) {
   function fire(n) {
     server.send(ack, port, ip, (err) => {
       if (err) console.error(`   ❌ ACK #${n} error: ${err.message}`);
-      else if (n === 0) console.log(`   ✅ Sent register ACK [21] ×3 to ${ip}:${port}`);
+      else if (n === 0) console.log(`    Sent register ACK [21] ×3 to ${ip}:${port}`);
     });
   }
 
@@ -355,7 +355,7 @@ function handleGameInfoResponse(packet, rinfo) {
   }
 
   if (!g) {
-    console.log(`   ⚠️  Info from unknown source ${rinfo.address}:${rinfo.port}`);
+    console.log(`     Info from unknown source ${rinfo.address}:${rinfo.port}`);
     return;
   }
 
@@ -368,7 +368,7 @@ function handleGameInfoResponse(packet, rinfo) {
     // Full info — we can extract basics but detailed parsing is complex
     parseGameInfoFull(packet, g);
   } else {
-    console.log(`   ⚠️  Unexpected info: opcode=${opcode} len=${packet.length}`);
+    console.log(`     Unexpected info: opcode=${opcode} len=${packet.length}`);
     return;
   }
 
@@ -377,7 +377,7 @@ function handleGameInfoResponse(packet, rinfo) {
     g.confirmed = true;
     sendRegisterAck(g);
 
-    console.log(`\n🎮 GAME CONFIRMED:`);
+    console.log(`\n GAME CONFIRMED:`);
     console.log(`   "${g.gameName}" on "${g.mission}"`);
     console.log(`   ${g.playerCount}/${g.maxPlayers} | ${g.gameMode} | Level ${g.level}`);
     console.log(`   Host: ${g.ip}:${g.port}`);
@@ -401,7 +401,7 @@ function parseGameInfoLite(packet, g) {
   const gameId  = packet.readUInt32LE(o); o += 4;
 
   if (g.gameId && gameId !== g.gameId) {
-    console.log(`   ⚠️  Game ID mismatch: expected ${g.gameId}, got ${gameId}`);
+    console.log(`     Game ID mismatch: expected ${g.gameId}, got ${gameId}`);
     return;
   }
 
@@ -457,7 +457,7 @@ function parseGameInfoLite(packet, g) {
 function parseGameInfoFull(packet, g) {
   try {
     if (packet.length < 50) {
-      console.log(`   ⚠️  Full info too short: ${packet.length} bytes`);
+      console.log(`     Full info too short: ${packet.length} bytes`);
       return;
     }
 
@@ -481,7 +481,7 @@ function parseGameInfoFull(packet, g) {
     const playerDataEnd = playerDataStart + TOTAL_SLOTS * stride;
 
     if (packet.length < playerDataEnd) {
-      console.log(`   ⚠️  Packet too short for player data: ${packet.length} < ${playerDataEnd}`);
+      console.log(`     Packet too short for player data: ${packet.length} < ${playerDataEnd}`);
       // Fallback: just log version
       console.log(`   Full game_info v${major}.${minor}.${micro} (${packet.length} bytes)`);
       return;
@@ -562,7 +562,7 @@ function parseGameInfoFull(packet, g) {
     console.log(`   Players: ${players.map(p => `${p.name}(${p.connected})`).join(', ') || 'none'}`);
 
   } catch (err) {
-    console.log(`   ⚠️  Full info parse error: ${err.message}`);
+    console.log(`     Full info parse error: ${err.message}`);
   }
 }
 
@@ -584,7 +584,7 @@ function handleUnregister(packet, rinfo) {
       return;
     }
   }
-  console.log('   ⚠️  Game not found');
+  console.log('     Game not found');
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -617,7 +617,7 @@ function handleVersionDeny(packet, rinfo) {
 // ═══════════════════════════════════════════════════════════════
 function handleGameListRequest(packet, rinfo) {
   if (packet.length !== 3) {
-    console.log(`   ⚠️  Wrong length: ${packet.length}`);
+    console.log(`     Wrong length: ${packet.length}`);
     return;
   }
 
@@ -666,7 +666,7 @@ function sendGameListResponse(g, rinfo) {
   buf[o++] = 0; // padding
 
   server.send(buf, rinfo.port, rinfo.address);
-  console.log(`   📤 Sent game "${g.gameName}" to ${rinfo.address}:${rinfo.port}`);
+  console.log(`    Sent game "${g.gameName}" to ${rinfo.address}:${rinfo.port}`);
 }
 
 // ── Opcode 99: Web UI Ping ──────────────────────────────────────
@@ -844,7 +844,7 @@ function startWebSocketServer() {
 
     console.log(`🔌 WebSocket server on port ${CONFIG.wsPort}`);
   } catch (e) {
-    console.log('⚠️  WebSocket disabled (npm i ws)');
+    console.log('  WebSocket disabled (npm i ws)');
   }
 }
 
@@ -880,7 +880,7 @@ function broadcastGameRemoval(id) {
 // ═══════════════════════════════════════════════════════════════
 function startGamelogWatcher() {
   if (CONFIG.gamelogDirs.length === 0) {
-    console.log('⚠️  No gamelog directories found (set GAMELOG_DIR or create ~/.d1x-redux/)');
+    console.log('  No gamelog directories found (set GAMELOG_DIR or create ~/.d1x-redux/)');
     return;
   }
 
@@ -904,7 +904,7 @@ function startGamelogWatcher() {
         }
       });
     } catch (err) {
-      console.log(`   ⚠️  fs.watch failed for ${dir}: ${err.message}`);
+      console.log(`     fs.watch failed for ${dir}: ${err.message}`);
     }
   }
 
@@ -1036,11 +1036,11 @@ function processGamelogUpdate(gamelogFile) {
       const typeIcon = {
         [EVENT.KILL]: '💀', [EVENT.DEATH]: '☠️',
         [EVENT.SUICIDE]: '💥', [EVENT.JOIN]: '📥',
-        [EVENT.REJOIN]: '📥', [EVENT.DISCONNECT]: '📤',
+        [EVENT.REJOIN]: '📥', [EVENT.DISCONNECT]: '',
         [EVENT.REACTOR_DESTROYED]: '🔥', [EVENT.ESCAPE]: '🚀',
         [EVENT.CHAT]: '💬', [EVENT.KILL_GOAL]: '🏆',
         [EVENT.FLAG_CAPTURED]: '🚩',
-      }[event.type] || '📋';
+      }[event.type] || '';
       console.log(`   ${typeIcon} [${event.type}] ${event.rawMessage}`);
     }
 
@@ -1172,7 +1172,7 @@ function startHTTPServer() {
             return;
           }
 
-          console.log(`\n📤 Gamelog upload from "${playerName}" (${content.length} bytes)`);
+          console.log(`\n Gamelog upload from "${playerName}" (${content.length} bytes)`);
 
           // Parse the content, replacing "You"/"Yourself" with this player's name
           const events = parseGamelogContent(content, { localPlayer: playerName });
@@ -1185,8 +1185,8 @@ function startHTTPServer() {
             uploadedAt: new Date().toISOString(),
           });
 
-          console.log(`   📊 ${meaningful.length} events parsed from ${playerName}`);
-          console.log(`   📦 Total clients: ${clientGamelogs.size}`);
+          console.log(`    ${meaningful.length} events parsed from ${playerName}`);
+          console.log(`    Total clients: ${clientGamelogs.size}`);
 
           // Re-merge all gamelogs and update
           mergeGamelogStatsIntoActiveGames();
@@ -1291,9 +1291,9 @@ function main() {
     console.log(`\n📝 Gamelog directories:`);
     CONFIG.gamelogDirs.forEach(d => console.log(`   ${d}/gamelog.txt`));
   }
-  console.log(`\n🎮 Steam launch options for DXX-Redux:`);
+  console.log(`\n Steam launch options for DXX-Redux:`);
   console.log(`   -tracker_hostaddr <YOUR_IP> -tracker_hostport ${CONFIG.udpPort}`);
-  console.log(`\n📊 Active games: ${activeGames.size}`);  
+  console.log(`\n Active games: ${activeGames.size}`);  
   console.log(`⏳ Waiting for game announcements… (Ctrl+C to stop)\n`);
 }
 
@@ -1301,7 +1301,7 @@ process.on('SIGINT', () => {
   console.log('\n🛑 Shutting down…');
   if (server) server.close();
   if (wss) wss.close();
-  console.log(`📊 ${activeGames.size} game(s) were active`);
+  console.log(` ${activeGames.size} game(s) were active`);
   console.log('👋 Goodbye!\n');
   process.exit(0);
 });

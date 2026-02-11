@@ -40,10 +40,10 @@ class GzipRequestHandler(http.server.SimpleHTTPRequestHandler):
 
 if __name__ == '__main__':
     with socketserver.TCPServer(("", PORT), GzipRequestHandler) as httpd:
-        print(f"✅ Server running at http://localhost:{PORT}/")
-        print(f"📁 Serving directory: {DIRECTORY}")
-        print(f"🗜️  Gzip compression enabled for JSON files")
+        print(f" Server running at http://localhost:{PORT}/")
+        print(f" Serving directory: {DIRECTORY}")
+        print(f"  Gzip compression enabled for JSON files")
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
-            print("\n👋 Server stopped")
+            print("\n Server stopped")

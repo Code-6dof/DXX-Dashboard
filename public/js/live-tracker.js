@@ -297,7 +297,7 @@
 
   // ── Start ──
   function init() {
-    console.log('🎮 DXX Live Tracker v3.0 (HTTP polling)');
+    console.log('DXX Live Tracker v3.0 (HTTP polling)');
     poll(); // First poll immediately
     pollTimer = setInterval(poll, POLL_INTERVAL);
 

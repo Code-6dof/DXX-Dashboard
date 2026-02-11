@@ -157,7 +157,7 @@ const GameDetail = (function () {
               <span class="version-badge ${versionClass}">${esc(game.version || "—")}</span>
               <span class="gdm-date">${formatDateTime(game.timestamp)}</span>
               ${game.timeElapsed ? `<span class="gdm-duration">⏱ ${esc(game.timeElapsed)}</span>` : ""}
-              ${game.gameName ? `<span class="gdm-gamename">🎮 ${esc(game.gameName)}</span>` : ""}
+              ${game.gameName ? `<span class="gdm-gamename">${esc(game.gameName)}</span>` : ""}
             </div>
           </div>
           <button class="gdm-close" id="gdmClose" title="Close">✕</button>
@@ -167,7 +167,7 @@ const GameDetail = (function () {
 
       <!-- Scoreboard -->
       <div class="gdm-section">
-        <h3>📊 Scoreboard</h3>
+        <h3> Scoreboard</h3>
         ${renderScoreboard(players, game.gameType)}
       </div>`;
 
@@ -175,10 +175,10 @@ const GameDetail = (function () {
     if (eventData) {
       html += `
       <div class="gdm-tabs" id="gdmTabs">
-        <button class="gdm-tab active" data-panel="killFeed">⚔️ Kill Feed</button>
-        <button class="gdm-tab" data-panel="killMatrix">🎯 Kill Matrix</button>
+        <button class="gdm-tab active" data-panel="killFeed"> Kill Feed</button>
+        <button class="gdm-tab" data-panel="killMatrix"> Kill Matrix</button>
         ${eventData.damageBreakdown && eventData.damageBreakdown.length > 0 ? `<button class="gdm-tab" data-panel="damage">💥 Damage</button>` : ""}
-        <button class="gdm-tab" data-panel="timeline">📜 Timeline</button>
+        <button class="gdm-tab" data-panel="timeline"> Timeline</button>
         ${eventData.chatLog && eventData.chatLog.length > 0 ? `<button class="gdm-tab" data-panel="chat">💬 Chat</button>` : ""}
       </div>
 
@@ -258,14 +258,14 @@ const GameDetail = (function () {
       return `
         <div class="gdm-duel-scoreboard">
           <div class="gdm-duel-player ${tied ? "" : p1Wins ? "winner" : "loser"}">
-            <div class="gdm-duel-name">${p1Wins && !tied ? "🏆 " : ""}${esc(p1.name)}</div>
+            <div class="gdm-duel-name">${p1Wins && !tied ? "" : ""}${esc(p1.name)}</div>
             <div class="gdm-duel-score">${p1.kills}</div>
             <div class="gdm-duel-sub">${p1.deaths}D · ${p1.suicides || 0}S</div>
             ${p1.kdRatio ? `<div class="gdm-duel-kd">${p1.kdRatio} K/D</div>` : ""}
           </div>
           <div class="gdm-duel-divider">VS</div>
           <div class="gdm-duel-player ${tied ? "" : !p1Wins ? "winner" : "loser"}">
-            <div class="gdm-duel-name">${!p1Wins && !tied ? "🏆 " : ""}${esc(p2.name)}</div>
+            <div class="gdm-duel-name">${!p1Wins && !tied ? "" : ""}${esc(p2.name)}</div>
             <div class="gdm-duel-score">${p2.kills}</div>
             <div class="gdm-duel-sub">${p2.deaths}D · ${p2.suicides || 0}S</div>
             ${p2.kdRatio ? `<div class="gdm-duel-kd">${p2.kdRatio} K/D</div>` : ""}
@@ -315,12 +315,12 @@ const GameDetail = (function () {
 
     const items = killFeed.map((k) => {
       const timeStr = k.time ? `<span class="kf-time">${esc(k.time)}</span>` : "";
-      let icon = "💀";
+      let icon = "";
       if (k.method && k.method.toLowerCase().includes("mine")) icon = "💣";
       if (k.method && k.method.toLowerCase().includes("missile")) icon = "🚀";
-      if (k.method && k.method.toLowerCase().includes("fusion")) icon = "⚡";
+      if (k.method && k.method.toLowerCase().includes("fusion")) icon = "";
       if (k.method && k.method.toLowerCase().includes("laser")) icon = "🔫";
-      if (k.killer === k.victim || !k.killer) icon = "☠️";
+      if (k.killer === k.victim || !k.killer) icon = "";
 
       return `
         <div class="kf-entry">
@@ -333,7 +333,7 @@ const GameDetail = (function () {
 
     return `
       <div class="gdm-kill-feed-header">
-        <span>⚔️ Kill Feed</span>
+        <span> Kill Feed</span>
         <span class="kf-count">${killFeed.length} kills</span>
       </div>
       <div class="gdm-kill-feed">${items}</div>`;
@@ -447,12 +447,12 @@ const GameDetail = (function () {
     }
 
     const typeIcons = {
-      kill: "⚔️",
-      death: "💀",
-      suicide: "☠️",
-      join: "📥",
-      leave: "📤",
-      disconnect: "📤",
+      kill: "",
+      death: "",
+      suicide: "",
+      join: "",
+      leave: "",
+      disconnect: "",
       reactor: "💥",
       escape: "🚀",
       chat: "💬",
@@ -462,7 +462,7 @@ const GameDetail = (function () {
       promotion: "⬆️",
       demotion: "⬇️",
       start: "🎮",
-      end: "🏁",
+      end: "",
     };
 
     const items = timeline.map((ev) => {
@@ -478,7 +478,7 @@ const GameDetail = (function () {
 
     return `
       <div class="gdm-timeline-header">
-        <span>📜 Event Timeline</span>
+        <span> Event Timeline</span>
         <span class="tl-count">${timeline.length} events</span>
       </div>
       <div class="gdm-timeline">${items}</div>`;

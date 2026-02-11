@@ -32,7 +32,7 @@ const CONCURRENCY = parseInt(process.env.CONCURRENCY) || 50;
 const limit = pLimit(CONCURRENCY);
 
 async function scrapeToJSON() {
-  console.log("📦 Scraping games directly to JSON file (2014-2026)...\n");
+  console.log(" Scraping games directly to JSON file (2014-2026)...\n");
   
   // 1. Fetch all yearly archive listings
   console.log(`  📄 Fetching ${YEARLY_ARCHIVES.length} archive pages...`);
@@ -50,13 +50,13 @@ async function scrapeToJSON() {
       const linksWithBase = links.map(link => ({ link, baseUrl }));
       allLinks.push(...linksWithBase);
       
-      console.log(`    ✅ ${year}: ${links.length} games`);
+      console.log(`     ${year}: ${links.length} games`);
     } catch (err) {
       console.error(`    ❌ Failed to fetch ${archiveUrl}: ${err.message}`);
     }
   }
   
-  console.log(`  ✅ Found ${allLinks.length} total game links\n`);
+  console.log(`   Found ${allLinks.length} total game links\n`);
   
   // 2. Fetch all game pages
   console.log(`  🔄 Fetching ${allLinks.length} game pages (${CONCURRENCY} concurrent)...`);
@@ -83,7 +83,7 @@ async function scrapeToJSON() {
   );
   
   await Promise.all(tasks);
-  console.log(`  ✅ Successfully parsed ${games.length} games\n`);
+  console.log(`   Successfully parsed ${games.length} games\n`);
   
   // 3. Calculate player stats
   console.log("  📈 Calculating player stats...");
@@ -125,7 +125,7 @@ async function scrapeToJSON() {
   });
   
   const players = Array.from(playerStats.values());
-  console.log(`  ✅ ${players.length} unique players\n`);
+  console.log(`   ${players.length} unique players\n`);
   
   // 4. Write to JSON file
   const output = {
@@ -143,11 +143,11 @@ async function scrapeToJSON() {
   fs.writeFileSync(outputPath, JSON.stringify(output));
   
   const sizeMB = (fs.statSync(outputPath).size / 1024 / 1024).toFixed(2);
-  console.log(`  ✅ Exported to public/data/games.json (minified)`);
-  console.log(`  📊 ${games.length} games, ${players.length} players`);
+  console.log(`   Exported to public/data/games.json (minified)`);
+  console.log(`   ${games.length} games, ${players.length} players`);
   console.log(`  💾 File size: ${sizeMB} MB\n`);
   
-  console.log("✅ Done! You can now commit this file to GitHub.\n");
+  console.log(" Done! You can now commit this file to GitHub.\n");
 }
 
 scrapeToJSON()
