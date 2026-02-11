@@ -9,7 +9,7 @@
 
   // ── State ──────────────────────────────────────────────────────
   let allGames = []; // Full dataset
-  let games = []; // Currently loaded games (initially half)
+  let games = []; // Currently loaded games (initially 200)
   let players = [];
   let currentMode = "all";
   let currentPage = 1;
@@ -17,6 +17,10 @@
   let ffaPage = 1;
   const PAGE_SIZE = 100;
   const CARD_PAGE_SIZE = 50;
+  const INITIAL_LOAD = 200; // Start with only 200 games
+  const LOAD_INCREMENT = 500; // Load 500 more at a time
+  let isLoading = false;
+  let renderDebounceTimer = null;
 
   const ARCHIVE_BASE = "https://retro-tracker.game-server.cc/archive";
 
@@ -25,10 +29,22 @@
     const response = await fetch("./data/games.json");
     const data = await response.json();
     allGames = data.games; // Store full dataset
-    games = data.games.slice(0, Math.ceil(data.games.length / 2)); // Load half initially
+    games = data.games.slice(0, INITIAL_LOAD); // Load only 200 initially
     players = data.players;
-    console.log(`Loaded ${games.length} of ${allGames.length} games initially`);
+    console.log(`Loaded ${games.length} of ${allGames.length} games initially (fast start)`);
     return games;
+  }
+
+  // ── Progressive Loading ───────────────────────────────────────
+  function loadMoreGames() {
+    if (isLoading || games.length >= allGames.length) return false;
+    isLoading = true;
+    const nextBatch = allGames.slice(games.length, games.length + LOAD_INCREMENT);
+    games = games.concat(nextBatch);
+    DXXFilters.setData(games, players);
+    console.log(`Loaded ${nextBatch.length} more games (${games.length}/${allGames.length})`);
+    isLoading = false;
+    return true;
   }
 
   async function loadPlayers() {
@@ -178,6 +194,8 @@
       return;
     }
 
+    // Use DocumentFragment for faster DOM building
+    const fragment = document.createDocumentFragment();
     page.forEach((g, idx) => {
       const winner = getWinner(g.players);
       const modeClass = g.gameType === "1v1" ? "mode-1v1" : "mode-ffa";
@@ -188,8 +206,12 @@
       const truncatedPlayers = playerNames.length > 45 ? playerNames.slice(0, 45) + "…" : playerNames;
       const archiveLink = g.filename ? `${ARCHIVE_BASE}/${g.filename}` : "#";
 
-      tbody.innerHTML += `
-        <tr class="game-row" data-game-idx="${start + idx}" style="cursor:pointer" title="Click for details">
+      const tr = document.createElement('tr');
+      tr.className = 'game-row';
+      tr.dataset.gameIdx = start + idx;
+      tr.style.cursor = 'pointer';
+      tr.title = 'Click for details';
+      tr.innerHTML = `
           <td>${formatDateTime(g.timestamp)}</td>
           <td><strong>${esc(g.map)}</strong></td>
           <td><span class="mode-badge ${modeClass}">${modeLabel}</span></td>
@@ -197,18 +219,14 @@
           <td title="${esc(playerNames)}">${esc(truncatedPlayers)}</td>
           <td>${esc(g.timeElapsed || "—")}</td>
           <td>${winner ? esc(winner.name) + " <span style='color:var(--green)'>" + winner.kills + "K</span>" : "—"}</td>
-          <td><a href="${archiveLink}" target="_blank" class="ext-link" title="View on Retro Tracker" onclick="event.stopPropagation()">↗</a></td>
-        </tr>`;
-    });
-
-    // Add click handlers for game rows
-    tbody.querySelectorAll(".game-row").forEach((row) => {
-      row.addEventListener("click", () => {
-        const gameIdx = parseInt(row.dataset.gameIdx);
-        const game = filtered[gameIdx];
+          <td><a href="${archiveLink}" target="_blank" class="ext-link" title="View on Retro Tracker" onclick="event.stopPropagation()">↗</a></td>`;
+      tr.addEventListener("click", () => {
+        const game = filtered[start + idx];
         if (game && typeof GameDetail !== "undefined") GameDetail.open(game);
       });
+      fragment.appendChild(tr);
     });
+    tbody.appendChild(fragment);
 
     renderPagination("pagination", filtered.length, currentPage, PAGE_SIZE, (p) => {
       currentPage = p;
@@ -230,6 +248,7 @@
       return;
     }
 
+    const fragment = document.createDocumentFragment();
     page.forEach((g, idx) => {
       const p1 = (g.players && g.players[0]) || { name: "?", kills: 0, deaths: 0, suicides: 0 };
       const p2 = (g.players && g.players[1]) || { name: "?", kills: 0, deaths: 0, suicides: 0 };
@@ -237,8 +256,11 @@
       const tied = p1.kills === p2.kills;
       const archiveLink = g.filename ? `${ARCHIVE_BASE}/${g.filename}` : "#";
 
-      container.innerHTML += `
-        <div class="duel-card clickable-card" data-duel-idx="${start + idx}" title="Click for details">
+      const div = document.createElement('div');
+      div.className = 'duel-card clickable-card';
+      div.dataset.duelIdx = start + idx;
+      div.title = 'Click for details';
+      div.innerHTML = `
           <div class="duel-header">
             <span>${formatDate(g.timestamp)}</span>
             <span class="map-name">${esc(g.map)}</span>
@@ -258,18 +280,14 @@
               <div class="score">${p2.kills}</div>
               <div class="sub-stats">${p2.deaths}D · ${p2.suicides || 0}S</div>
             </div>
-          </div>
-        </div>`;
-    });
-
-    // Add click handlers for duel cards
-    container.querySelectorAll(".clickable-card").forEach((card) => {
-      card.addEventListener("click", () => {
-        const gameIdx = parseInt(card.dataset.duelIdx);
-        const game = duels[gameIdx];
+          </div>`;
+      div.addEventListener("click", () => {
+        const game = duels[start + idx];
         if (game && typeof GameDetail !== "undefined") GameDetail.open(game);
       });
+      fragment.appendChild(div);
     });
+    container.appendChild(fragment);
 
     renderPagination("duelPagination", duels.length, duelPage, CARD_PAGE_SIZE, (p) => {
       duelPage = p;
@@ -293,6 +311,7 @@
     }
 
     const medals = ["#1", "#2", "#3"];
+    const fragment = document.createDocumentFragment();
 
     page.forEach((g, idx) => {
       const sorted = [...(g.players || [])].sort((a, b) => b.kills - a.kills);
@@ -311,8 +330,11 @@
           </li>`;
       });
 
-      container.innerHTML += `
-        <div class="ffa-card clickable-ffa" data-ffa-idx="${start + idx}" title="Click for details">
+      const div = document.createElement('div');
+      div.className = 'ffa-card clickable-ffa';
+      div.dataset.ffaIdx = start + idx;
+      div.title = 'Click for details';
+      div.innerHTML = `
           <div class="ffa-header">
             <span>${formatDate(g.timestamp)}</span>
             <span class="map-name">${esc(g.map)}</span>
@@ -321,18 +343,14 @@
             <span>${esc(g.timeElapsed || "")}</span>
             <a href="${archiveLink}" target="_blank" class="ext-link" title="View on Retro Tracker" onclick="event.stopPropagation()">↗</a>
           </div>
-          <ol class="ffa-standings">${standingsHtml}</ol>
-        </div>`;
-    });
-
-    // Add click handlers for FFA cards
-    container.querySelectorAll(".clickable-ffa").forEach((card) => {
-      card.addEventListener("click", () => {
-        const gameIdx = parseInt(card.dataset.ffaIdx);
-        const game = ffaGames[gameIdx];
+          <ol class="ffa-standings">${standingsHtml}</ol>`;
+      div.addEventListener("click", () => {
+        const game = ffaGames[start + idx];
         if (game && typeof GameDetail !== "undefined") GameDetail.open(game);
       });
+      fragment.appendChild(div);
     });
+    container.appendChild(fragment);
 
     renderPagination("ffaPagination", ffaGames.length, ffaPage, CARD_PAGE_SIZE, (p) => {
       ffaPage = p;
@@ -470,6 +488,12 @@
     if (currentMode === "ffa") renderFFA(filtered);
   }
 
+  // ── Debounced Refresh ──────────────────────────────────────────
+  function debouncedRefresh(delay = 300) {
+    clearTimeout(renderDebounceTimer);
+    renderDebounceTimer = setTimeout(refresh, delay);
+  }
+
   // ── Event Listeners ────────────────────────────────────────────
   document.getElementById("modeTabs").addEventListener("click", (e) => {
     if (e.target.classList.contains("tab")) {
@@ -492,14 +516,35 @@
     refresh();
   });
 
-  document.getElementById("searchInput").addEventListener("keyup", (e) => {
-    if (e.key === "Enter") {
-      currentPage = 1;
-      duelPage = 1;
-      ffaPage = 1;
+  document.getElementById("searchInput").addEventListener("input", () => {
+    currentPage = 1;
+    duelPage = 1;
+    ffaPage = 1;
+    debouncedRefresh(500);
+  });
+
+  // Load more button
+  const loadMoreBtn = document.createElement('button');
+  loadMoreBtn.id = 'loadMoreBtn';
+  loadMoreBtn.textContent = `Load More Games (${games.length}/${allGames.length} loaded)`;
+  loadMoreBtn.style.cssText = 'margin: 2rem auto; display: block; padding: 1rem 2rem; background: var(--accent); color: white; border: none; cursor: pointer; font-size: 1rem; border-radius: 4px;';
+  loadMoreBtn.addEventListener('click', () => {
+    if (loadMoreGames()) {
+      loadMoreBtn.textContent = `Load More Games (${games.length}/${allGames.length} loaded)`;
       refresh();
+      if (games.length >= allGames.length) {
+        loadMoreBtn.textContent = 'All games loaded';
+        loadMoreBtn.disabled = true;
+        loadMoreBtn.style.opacity = '0.5';
+      }
     }
   });
+  
+  // Insert button after stats bar
+  const statsBar = document.querySelector('.stats-bar');
+  if (statsBar && games.length < allGames.length) {
+    statsBar.parentNode.insertBefore(loadMoreBtn, statsBar.nextSibling);
+  }
 
   // Chart toggle functionality
   const toggleChartsBtn = document.getElementById("toggleCharts");
