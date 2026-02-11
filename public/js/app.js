@@ -8,21 +8,20 @@
   "use strict";
 
   // ── State ──────────────────────────────────────────────────────
-  let allGames = []; // Full dataset
-  let games = []; // Currently loaded games (initially 200)
+  let games = []; // Currently displayed games
   let players = [];
+  let gameMeta = null; // { totalGames, totalPlayers, duels, ffa }
   let currentMode = "all";
   let currentPage = 1;
   let duelPage = 1;
   let ffaPage = 1;
   const PAGE_SIZE = 100;
   const CARD_PAGE_SIZE = 50;
-  const INITIAL_LOAD = 200; // Start with only 200 games
-  const LOAD_INCREMENT = 500; // Load 500 more at a time
   let isLoading = false;
   let renderDebounceTimer = null;
 
   const ARCHIVE_BASE = "https://retro-tracker.game-server.cc/archive";
+  const API_BASE = window.location.origin;
 
   // ── Generate unique game ID ────────────────────────────────────
   function generateGameId(game, index) {
@@ -39,92 +38,80 @@
 
   // Ensure all games have IDs
   function ensureGameIds() {
-    allGames.forEach((g, i) => {
-      if (!g.id) g.id = generateGameId(g, i);
-    });
     games.forEach((g, i) => {
       if (!g.id) g.id = generateGameId(g, i);
     });
   }
 
-  // ── Load Data from JSON file ───────────────────────────────────
-  async function loadGames() {
+  // ── Load Metadata (counts only) ───────────────────────────────
+  async function loadMetadata() {
     const progressText = document.getElementById('loadingProgress');
     const loadingTextEl = document.getElementById('loadingText');
     
     try {
-      // Fetch with progress tracking
-      loadingTextEl.textContent = 'Downloading game data...';
-      const response = await fetch("./data/games.json");
+      loadingTextEl.textContent = 'Loading game statistics...';
+      progressText.textContent = 'Fetching metadata';
       
-      // Get total size if available
-      const contentLength = response.headers.get('Content-Length');
-      const total = contentLength ? parseInt(contentLength, 10) : 0;
+      const response = await fetch(`${API_BASE}/api/games/meta`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       
-      if (!response.body) {
-        // Fallback if no streaming support
-        const data = await response.json();
-        allGames = data.games;
-        games = data.games.slice(0, INITIAL_LOAD);
-        players = data.players;
-        return games;
-      }
+      gameMeta = await response.json();
+      progressText.textContent = `Found ${gameMeta.totalGames.toLocaleString()} games in archive`;
+      console.log('Metadata loaded:', gameMeta);
+      return gameMeta;
+    } catch (err) {
+      console.error('Error loading metadata:', err);
+      throw err;
+    }
+  }
+
+  // ── Load Paginated Games ───────────────────────────────────────
+  async function loadGames(page = 1, limit = PAGE_SIZE) {
+    const progressText = document.getElementById('loadingProgress');
+    const loadingTextEl = document.getElementById('loadingText');
+    
+    try {
+      loadingTextEl.textContent = `Loading page ${page}...`;
+      progressText.textContent = `Fetching ${limit} games`;
       
-      // Stream response with progress
-      const reader = response.body.getReader();
-      const chunks = [];
-      let loaded = 0;
+      const response = await fetch(`${API_BASE}/api/games?page=${page}&limit=${limit}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        
-        chunks.push(value);
-        loaded += value.length;
-        
-        if (total > 0) {
-          const percent = Math.round((loaded / total) * 100);
-          const mb = (loaded / 1024 / 1024).toFixed(1);
-          const totalMb = (total / 1024 / 1024).toFixed(1);
-          progressText.textContent = `${mb} MB / ${totalMb} MB (${percent}%)`;
-        } else {
-          const mb = (loaded / 1024 / 1024).toFixed(1);
-          progressText.textContent = `${mb} MB downloaded`;
-        }
-      }
-      
-      // Combine chunks and parse
-      loadingTextEl.textContent = 'Processing game data...';
-      progressText.textContent = 'Parsing JSON...';
-      
-      const blob = new Blob(chunks);
-      const text = await blob.text();
-      const data = JSON.parse(text);
-      
-      allGames = data.games; // Store full dataset
-      games = data.games.slice(0, INITIAL_LOAD); // Load only 200 initially
+      const data = await response.json();
+      games = data.games;
       players = data.players;
       
-      progressText.textContent = `Loading ${games.length} of ${allGames.length} games for fast display`;
-      console.log(`Loaded ${games.length} of ${allGames.length} games initially (fast start)`);
-      return games;
-      
+      progressText.textContent = `Loaded ${games.length} games (page ${page} of ${data.pagination.totalPages})`;
+      console.log(`Loaded page ${page}: ${games.length} games`);
+      return data;
     } catch (err) {
       console.error('Error loading games:', err);
       throw err;
     }
   }
 
-  // ── Progressive Loading ───────────────────────────────────────
-  function loadMoreGames() {
-    if (isLoading || games.length >= allGames.length) return false;
+  // ── Load More Games (next page) ────────────────────────────────
+  async function loadMoreGames() {
+    if (isLoading || !gameMeta) return false;
+    
+    const totalPages = Math.ceil(gameMeta.totalGames / PAGE_SIZE);
+    const nextPage = Math.floor(games.length / PAGE_SIZE) + 1;
+    
+    if (nextPage > totalPages) return false;
+    
     isLoading = true;
-    const nextBatch = allGames.slice(games.length, games.length + LOAD_INCREMENT);
-    games = games.concat(nextBatch);
-    DXXFilters.setData(games, players);
-    console.log(`Loaded ${nextBatch.length} more games (${games.length}/${allGames.length})`);
-    isLoading = false;
-    return true;
+    try {
+      const data = await loadGames(nextPage, PAGE_SIZE);
+      games = games.concat(data.games);
+      DXXFilters.setData(games, players);
+      console.log(`Loaded page ${nextPage}: now have ${games.length} games`);
+      return true;
+    } catch (err) {
+      console.error('Error loading more games:', err);
+      return false;
+    } finally {
+      isLoading = false;
+    }
   }
 
   async function loadPlayers() {
@@ -169,8 +156,14 @@
     const totalGamesEl = document.getElementById("totalGames");
     if (!totalGamesEl) return; // Stats bar not present on this page
 
-    totalGamesEl.textContent = filtered.length.toLocaleString();
-    totalGamesEl.title = `${filtered.length} games`;
+    // Show total from metadata and current loaded
+    const displayText = gameMeta 
+      ? `${filtered.length.toLocaleString()} / ${gameMeta.totalGames.toLocaleString()}`
+      : filtered.length.toLocaleString();
+    totalGamesEl.textContent = displayText;
+    totalGamesEl.title = gameMeta 
+      ? `Showing ${filtered.length} of ${gameMeta.totalGames} total games`
+      : `${filtered.length} games`;
 
     const uniquePlayers = new Set();
     let totalKills = 0;
@@ -654,7 +647,11 @@
   const overlay = document.getElementById("loadingOverlay");
 
   try {
-    await Promise.all([loadGames(), loadPlayers()]);
+    // Load metadata first (just counts, fast)
+    await loadMetadata();
+    
+    // Then load first page of games
+    await loadGames(1, PAGE_SIZE);
     ensureGameIds(); // Generate IDs for all games
     DXXFilters.setData(games, players);
     
@@ -664,16 +661,16 @@
       const newest = games[0];
       const startDate = formatDate(oldest.timestamp);
       const endDate = formatDate(newest.timestamp);
-      console.log(`DXX Dashboard: Showing ${games.length} of ${allGames.length} games (${startDate} to ${endDate})`);
+      console.log(`DXX Dashboard: Showing ${games.length} of ${gameMeta.totalGames} games (${startDate} to ${endDate})`);
     }
     
     switchView("all");
 
-    console.log(`DXX Dashboard loaded: ${games.length} games shown, ${allGames.length} total, ${players.length} players.`);
+    console.log(`DXX Dashboard loaded: ${games.length} games shown, ${gameMeta.totalGames} total, ${players.length} players.`);
   } catch (err) {
     console.error("Failed to load data:", err);
     document.getElementById("gamesBody").innerHTML =
-      '<tr><td colspan="8" style="text-align:center;color:var(--red);padding:2rem">Failed to load data. Check that /data/games.json exists.</td></tr>';
+      '<tr><td colspan="8" style="text-align:center;color:var(--red);padding:2rem">Failed to load data. Check API connection.</td></tr>';
   } finally {
     overlay.classList.add("hidden");
   }
