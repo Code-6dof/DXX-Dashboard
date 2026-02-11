@@ -1,5 +1,5 @@
 /**
- * DXX Dashboard — Game Page v2.0
+ * DXX Dashboard — Game Page v2.1
  *
  * Standalone game detail page. Can show:
  * 1. Live games (polls /data/live-games.json)
@@ -67,9 +67,24 @@
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       
-      // Find game by ID
-      const game = data.games.find(g => g.id === gameId);
+      // Try multiple matching strategies
+      let game = data.games.find(g => g.id === gameId);
+      
+      // If not found by ID, try matching by old filename-based ID
+      if (!game && gameId.includes('-')) {
+        game = data.games.find(g => {
+          // Match by timestamp pattern in ID
+          const tsMatch = gameId.match(/(\d{2}-\d{2}-\d{4}-\d{2}-\d{2}-\d{2})/);
+          if (tsMatch && g.timestamp) {
+            const gameTs = new Date(g.timestamp).toISOString();
+            return gameTs.includes(tsMatch[1].replace(/-/g, ''));
+          }
+          return false;
+        });
+      }
+      
       if (!game) {
+        console.warn(`Game not found in archive: ${gameId}`);
         loadingEl.style.display = 'none';
         notFoundEl.style.display = 'block';
         return;
@@ -77,6 +92,7 @@
 
       isArchiveGame = true;
       currentGame = game;
+      console.log('Loaded archive game:', game.id || gameId);
       render(game);
     } catch (e) {
       console.error('Failed to load archive game:', e);
@@ -101,10 +117,18 @@
 
       if (!game) {
         missedPolls++;
-        if (missedPolls >= MAX_MISSED && !currentGame) {
-          // Not a live game, try loading from archive
+        // Try archive immediately on first miss if we haven't loaded currentGame yet
+        if (missedPolls === 1 && !currentGame) {
+          console.log('Game not in live-games, trying archive...');
           clearInterval(pollTimer);
           await loadArchiveGame();
+        } else if (missedPolls >= MAX_MISSED && !currentGame) {
+          // Fallback: if archive also failed after multiple attempts
+          console.warn('Game not found in live-games or archive');
+          loadingEl.style.display = 'none';
+          notFoundEl.style.display = 'block';
+          contentEl.style.display = 'none';
+          clearInterval(pollTimer);
         }
         return;
       }
@@ -463,7 +487,7 @@
 
   // ── Start ──
   function init() {
-    console.log(`DXX Game Page v1.0 — Game ID: ${gameId}`);
+    console.log(`DXX Game Page v2.1 — Game ID: ${gameId}`);
     setupTabs();
     poll(); // First poll immediately
     pollTimer = setInterval(poll, POLL_INTERVAL);
