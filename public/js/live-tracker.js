@@ -170,8 +170,16 @@
 
     const meta = card.querySelector('.game-card-meta');
     if (meta) {
-      const hostInfo = game.host ? ` • ${game.host}:${game.port}` : '';
-      meta.textContent = `${game.mission || ''} • ${game.playerCount || players.length}/${game.maxPlayers || 8} players${hostInfo}`;
+      const mode = game.gameMode || 'Anarchy';
+      const duration = game.timeElapsed || '';
+      const metaItems = [
+        `<span class="game-card-meta-item">${esc(game.mission || 'Unknown Map')}</span>`,
+        `<span class="game-card-meta-item">${game.playerCount || players.length}/${game.maxPlayers || 8}</span>`,
+        `<span class="game-card-meta-item">${esc(mode)}</span>`,
+        duration ? `<span class="game-card-meta-item">${esc(duration)}</span>` : '',
+        game.host ? `<span class="game-card-meta-item">${esc(game.host)}:${game.port}</span>` : ''
+      ].filter(Boolean);
+      meta.innerHTML = metaItems.join('');
     }
 
     // Players
@@ -185,8 +193,8 @@
               <div class="player-row">
                 <span class="player-name">${esc(p.name)}</span>
                 <span class="player-stats">
-                  <span class="stat-kills">${p.kills || 0}K</span> /
-                  <span class="stat-deaths">${p.deaths || 0}D</span> /
+                  <span class="stat-kills">${p.kills || 0}K</span>
+                  <span class="stat-deaths">${p.deaths || 0}D</span>
                   <span class="stat-suicides">${p.suicides || 0}S</span>
                 </span>
               </div>`).join('')
@@ -217,8 +225,12 @@
           : 'Game in progress';
         kp.textContent = lastKill;
       }
-      const st = footer.querySelector('span:last-child');
-      if (st) st.textContent = `${game.gameMode || 'Anarchy'} • ${game.totalKills || 0} kills`;
+      const summary = footer.querySelector('.game-stats-summary');
+      if (summary) {
+        summary.innerHTML = `
+          <span>💀 ${game.totalKills || 0}</span>
+          ${game.totalDeaths ? `<span>☠️ ${game.totalDeaths}</span>` : ''}`;
+      }
     }
   }
 
@@ -231,8 +243,8 @@
           <div class="player-row">
             <span class="player-name">${esc(p.name)}</span>
             <span class="player-stats">
-              <span class="stat-kills">${p.kills || 0}K</span> /
-              <span class="stat-deaths">${p.deaths || 0}D</span> /
+              <span class="stat-kills">${p.kills || 0}K</span>
+              <span class="stat-deaths">${p.deaths || 0}D</span>
               <span class="stat-suicides">${p.suicides || 0}S</span>
             </span>
           </div>`).join('')
@@ -243,25 +255,31 @@
       : 'Game in progress';
 
     const gameName = game.gameName || game.mission || 'Unknown Map';
-    const hostInfo = game.host ? ` • ${game.host}:${game.port}` : '';
+    const mode = game.gameMode || 'Anarchy';
+    const duration = game.timeElapsed || '';
 
     return `
       <div class="active-game-card" data-game-id="${esc(game.id)}">
         <div class="game-card-header">
           <div class="game-card-title">${esc(gameName)}</div>
-          <span class="live-badge">🔴 LIVE</span>
+          <span class="live-badge">● LIVE</span>
         </div>
         <div class="game-card-meta">
-          ${esc(game.mission || '')} •
-          ${game.playerCount || players.length}/${game.maxPlayers || 8} players
-          ${hostInfo}
+          <span class="game-card-meta-item">${esc(game.mission || 'Unknown Map')}</span>
+          <span class="game-card-meta-item">${game.playerCount || players.length}/${game.maxPlayers || 8}</span>
+          <span class="game-card-meta-item">${esc(mode)}</span>
+          ${duration ? `<span class="game-card-meta-item">${esc(duration)}</span>` : ''}
+          ${game.host ? `<span class="game-card-meta-item">${esc(game.host)}:${game.port}</span>` : ''}
         </div>
         <div class="game-card-players">
           ${playerRows}
         </div>
         <div class="game-card-footer">
           <span class="kill-feed-preview">${esc(lastKill)}</span>
-          <span>${game.gameMode || 'Anarchy'} • ${game.totalKills || 0} kills</span>
+          <span class="game-stats-summary">
+            <span>💀 ${game.totalKills || 0}</span>
+            ${game.totalDeaths ? `<span>☠️ ${game.totalDeaths}</span>` : ''}
+          </span>
         </div>
       </div>`;
   }

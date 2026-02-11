@@ -217,121 +217,235 @@
 }
 
 .active-game-card {
-  background: rgba(10, 0, 20, 0.85); /* Dark semi-transparent */
-  border: 1px solid var(--accent);
-  padding: 0; /* Reset padding for header/body split */
+  background: linear-gradient(145deg, rgba(15, 0, 30, 0.95), rgba(10, 0, 20, 0.85));
+  border: 1px solid rgba(213, 0, 249, 0.3);
+  border-radius: 12px;
+  padding: 0;
   position: relative;
   overflow: hidden;
-  transition: all 0.3s ease;
-  box-shadow: 0 0 20px rgba(0, 0, 0, 0.8);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+}
+
+.active-game-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), transparent);
+  opacity: 0;
+  transition: opacity 0.3s;
 }
 
 .active-game-card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 10px 40px rgba(213, 0, 249, 0.15);
-  border-color: #fff;
+  transform: translateY(-8px) scale(1.01);
+  box-shadow: 0 16px 48px rgba(213, 0, 249, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  border-color: var(--accent);
+}
+
+.active-game-card:hover::before {
+  opacity: 1;
 }
 
 /* Card Header Strip */
 .game-card-header {
-  background: linear-gradient(90deg, rgba(213, 0, 249, 0.2) 0%, transparent 100%);
-  padding: 1rem 1.5rem;
+  background: linear-gradient(135deg, rgba(213, 0, 249, 0.15) 0%, rgba(100, 0, 200, 0.08) 100%);
+  padding: 1.25rem 1.5rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(213, 0, 249, 0.15);
+  position: relative;
 }
 
 .game-card-title {
   font-family: var(--font-heading);
-  font-size: 1.2rem;
-  font-weight: 700;
+  font-size: 1.3rem;
+  font-weight: 800;
   color: #fff;
   margin: 0;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.live-badge {
-  background: var(--accent);
-  color: #000;
-  font-family: var(--mono);
-  font-size: 0.75rem;
-  font-weight: 900;
-  padding: 0.2rem 0.5rem;
-  text-transform: uppercase;
-  box-shadow: 0 0 10px var(--accent);
-  animation: live-blink 1.5s infinite alternate;
-}
-
-@keyframes live-blink {
-  from { opacity: 1; box-shadow: 0 0 10px var(--accent); }
-  to { opacity: 0.7; box-shadow: 0 0 2px var(--accent); }
-}
-
-.game-card-meta {
-  padding: 0.8rem 1.5rem;
-  font-family: var(--mono);
-  font-size: 0.8rem;
-  color: var(--text-dim);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  background: rgba(0, 0, 0, 0.3);
-}
-
-/* Players List */
-.game-card-players {
-  padding: 1rem 1.5rem;
-}
-
-.player-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.6rem 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.player-row:last-child {
-  border-bottom: none;
-}
-
-.player-name {
-  font-weight: 600;
-  color: var(--text);
-  font-size: 1rem;
-}
-
-.player-stats {
-  font-family: var(--mono);
-  font-size: 0.9rem;
-  color: var(--text-dim);
-}
-
-.stat-kills { 
-  color: var(--accent); 
-  text-shadow: 0 0 5px rgba(213, 0, 249, 0.5);
-  font-weight: 700; 
-}
-.stat-deaths { color: var(--red); }
-.stat-suicides { color: var(--text-muted); }
-
-.game-card-footer {
-  padding: 1rem 1.5rem;
-  background: rgba(0, 0, 0, 0.5);
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
-  font-family: var(--mono);
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  display: flex;
-  justify-content: space-between;
-}
-
-.kill-feed-preview {
+  letter-spacing: 0.08em;
+  text-shadow: 0 2px 8px rgba(213, 0, 249, 0.3);
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  margin-right: 1rem;
+  padding-right: 1rem;
+}
+
+.live-badge {
+  background: linear-gradient(135deg, #ff0844, #ff3366);
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 900;
+  padding: 0.35rem 0.7rem;
+  border-radius: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  box-shadow: 0 0 20px rgba(255, 8, 68, 0.6), 0 4px 12px rgba(0, 0, 0, 0.3);
+  animation: live-pulse 2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes live-pulse {
+  0%, 100% { 
+    opacity: 1; 
+    box-shadow: 0 0 20px rgba(255, 8, 68, 0.6), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+  50% { 
+    opacity: 0.85; 
+    box-shadow: 0 0 30px rgba(255, 8, 68, 0.8), 0 4px 16px rgba(0, 0, 0, 0.4);
+  }
+}
+
+.game-card-meta {
+  padding: 0.9rem 1.5rem;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  background: rgba(0, 0, 0, 0.25);
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.game-card-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.game-card-meta-item::before {
+  content: '•';
+  color: var(--accent);
+  font-weight: 900;
+}
+
+.game-card-meta-item:first-child::before {
+  content: '';
+}
+
+/* Players List */
+.game-card-players {
+  padding: 1.25rem 1.5rem;
+  display: grid;
+  gap: 0.75rem;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.game-card-players::-webkit-scrollbar {
+  width: 6px;
+}
+
+.game-card-players::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.game-card-players::-webkit-scrollbar-thumb {
+  background: var(--accent);
+  border-radius: 3px;
+}
+
+.player-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  padding: 0.7rem 1rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+
+.player-row:hover {
+  background: rgba(213, 0, 249, 0.08);
+  border-color: rgba(213, 0, 249, 0.3);
+  transform: translateX(4px);
+}
+
+.player-row:first-child {
+  border-color: var(--accent);
+  background: rgba(213, 0, 249, 0.08);
+  box-shadow: 0 0 12px rgba(213, 0, 249, 0.15);
+}
+
+.player-row:first-child .player-name::before {
+  content: '👑 ';
+}
+
+.player-name {
+  font-weight: 700;
+  color: var(--text);
+  font-size: 1.05rem;
+  letter-spacing: 0.02em;
+}
+
+.player-row:first-child .player-name {
+  color: #ffd740;
+  text-shadow: 0 0 8px rgba(255, 215, 64, 0.4);
+}
+
+.player-stats {
+  font-family: var(--mono);
+  font-size: 0.95rem;
+  color: var(--text-dim);
+  display: flex;
+  gap: 0.8rem;
+}
+
+.stat-kills { 
+  color: #4ade80;
+  font-weight: 800;
+  text-shadow: 0 0 4px rgba(74, 222, 128, 0.3);
+}
+
+.stat-deaths { 
+  color: #f87171;
+  font-weight: 700;
+}
+
+.stat-suicides { 
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.game-card-footer {
+  padding: 1.1rem 1.5rem;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.5));
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 1rem;
+  align-items: center;
+}
+
+.kill-feed-preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent);
+  font-size: 0.85rem;
+}
+
+.game-stats-summary {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  font-size: 0.85rem;
+}
+
+.game-stats-summary span {
+  white-space: nowrap;
 }
 
 /* ── No Games State ── */
