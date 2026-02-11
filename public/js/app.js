@@ -21,7 +21,8 @@
   let renderDebounceTimer = null;
 
   const ARCHIVE_BASE = "https://retro-tracker.game-server.cc/archive";
-  const API_BASE = window.location.origin;
+  // Use relative URLs so it works on both local and production
+  const API_BASE = "";
 
   // ── Generate unique game ID ────────────────────────────────────
   function generateGameId(game, index) {
