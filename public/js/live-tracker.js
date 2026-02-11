@@ -10,7 +10,7 @@
   'use strict';
 
   // ── Configuration ──
-  const POLL_URL = 'data/live-games.json';
+  const POLL_URL = 'http://129.80.20.218:8080/data/live-games.json';
   const POLL_INTERVAL = 5000; // 5 seconds, same as PyTracker
   const MAX_RECENT_GAMES = 10;
 
@@ -118,7 +118,7 @@
     } catch (e) {
       // File doesn't exist yet or server is down
       statusEl.className = 'connection-status disconnected';
-      statusEl.querySelector('.status-text').textContent = 'Waiting for tracker…';
+      statusEl.querySelector('.status-text').textContent = 'Disconnected';
     }
   }
 
@@ -248,15 +248,13 @@
     return `
       <div class="active-game-card" data-game-id="${esc(game.id)}">
         <div class="game-card-header">
-          <div>
-            <div class="game-card-title">${esc(gameName)}</div>
-            <div class="game-card-meta">
-              ${esc(game.mission || '')} •
-              ${game.playerCount || players.length}/${game.maxPlayers || 8} players
-              ${hostInfo}
-            </div>
-          </div>
+          <div class="game-card-title">${esc(gameName)}</div>
           <span class="live-badge">🔴 LIVE</span>
+        </div>
+        <div class="game-card-meta">
+          ${esc(game.mission || '')} •
+          ${game.playerCount || players.length}/${game.maxPlayers || 8} players
+          ${hostInfo}
         </div>
         <div class="game-card-players">
           ${playerRows}

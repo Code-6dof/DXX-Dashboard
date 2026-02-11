@@ -6,6 +6,7 @@ const DXXCharts = (() => {
   let modeDistChart = null;
   let topPlayersChart = null;
   let topMapsChart = null;
+  let dayOfWeekChart = null;
 
   const C = {
     accent: "#00e5ff",
@@ -33,15 +34,12 @@ const DXXCharts = (() => {
     const labels = Object.keys(monthCounts).sort();
     const data = labels.map((l) => monthCounts[l]);
 
-    // Format labels - show every other month for readability
-    const formatted = labels.map((l, i) => {
-      if (i % 2 === 0 || i === 0 || i === labels.length - 1) {
-        const [y, m] = l.split("-");
-        const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-        const monthNum = parseInt(m, 10) - 1;
-        return `${months[monthNum]} '${y.slice(2)}`;
-      }
-      return "";
+    // Format labels - show all months
+    const formatted = labels.map((l) => {
+      const [y, m] = l.split("-");
+      const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+      const monthNum = parseInt(m, 10) - 1;
+      return `${months[monthNum]} '${y.slice(2)}`;
     });
 
     // Calculate 12-month moving average
@@ -110,7 +108,8 @@ const DXXCharts = (() => {
               ...defaultScaleOpts.ticks, 
               maxRotation: 45, 
               minRotation: 45,
-              autoSkip: false
+              autoSkip: true,
+              maxTicksLimit: 24
             }
           }, 
           y: { ...defaultScaleOpts, beginAtZero: true } 
@@ -220,7 +219,14 @@ const DXXCharts = (() => {
         },
         scales: {
           x: { ...defaultScaleOpts, beginAtZero: true },
-          y: { ...defaultScaleOpts, ticks: { ...defaultScaleOpts.ticks, font: { size: 10 } } },
+          y: { 
+            ...defaultScaleOpts, 
+            ticks: { 
+              ...defaultScaleOpts.ticks, 
+              font: { size: 10 },
+              autoSkip: false
+            } 
+          },
         },
       },
     });
@@ -264,11 +270,60 @@ const DXXCharts = (() => {
         },
         scales: {
           x: { ...defaultScaleOpts, beginAtZero: true },
-          y: { ...defaultScaleOpts, ticks: { ...defaultScaleOpts.ticks, font: { size: 10 } } },
+          y: { 
+            ...defaultScaleOpts, 
+            ticks: { 
+              ...defaultScaleOpts.ticks, 
+              font: { size: 10 },
+              autoSkip: false
+            } 
+          },
         },
       },
     });
   }
 
-  return { renderGamesOverTime, renderModeDist, renderTopPlayers, renderTopMaps };
+  /** Day of Week Distribution — bar chart showing game activity by day */
+  function renderDayOfWeek(dayCounts) {
+    const ctx = document.getElementById("dayOfWeekChart");
+    if (!ctx) return;
+    
+    const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const data = days.map(day => dayCounts[day] || 0);
+    
+    if (dayOfWeekChart) dayOfWeekChart.destroy();
+    dayOfWeekChart = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: days,
+        datasets: [
+          {
+            label: "Games Played",
+            data,
+            backgroundColor: C.accent,
+            borderRadius: 4,
+            barThickness: 40,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (context) => `${context.parsed.y.toLocaleString()} games`
+            }
+          }
+        },
+        scales: {
+          x: { ...defaultScaleOpts },
+          y: { ...defaultScaleOpts, beginAtZero: true },
+        },
+      },
+    });
+  }
+
+  return { renderGamesOverTime, renderModeDist, renderTopPlayers, renderTopMaps, renderDayOfWeek };
 })();

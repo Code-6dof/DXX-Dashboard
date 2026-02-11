@@ -17,6 +17,10 @@ class GzipRequestHandler(http.server.SimpleHTTPRequestHandler):
         super().__init__(*args, directory=DIRECTORY, **kwargs)
     
     def end_headers(self):
+        # Add CORS headers to allow GitHub Pages to fetch data
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         # Add compression for JSON files
         if self.path.endswith('.json'):
             self.send_header('Content-Encoding', 'gzip')

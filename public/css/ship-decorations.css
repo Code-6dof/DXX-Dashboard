@@ -1,0 +1,70 @@
+/* Ship Decorations */
+.ship-decoration {
+  position: fixed;
+  bottom: 10%;
+  width: 450px; /* Much larger */
+  max-width: 30vw;
+  height: auto;
+  opacity: 0.9; /* More visible */
+  z-index: 0; /* Behind content */
+  pointer-events: none;
+  filter: drop-shadow(0 0 30px rgba(213, 0, 249, 0.3));
+  animation: float 8s ease-in-out infinite;
+}
+
+.ship-left {
+  left: -50px;
+  transform: rotate(10deg);
+  animation-delay: 0s;
+}
+
+.ship-right {
+  right: -50px;
+  transform: scaleX(-1) rotate(10deg);
+  animation-delay: 4s;
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px) rotate(10deg);
+  }
+  50% {
+    transform: translateY(-30px) rotate(12deg);
+  }
+}
+
+/* Right ship needs specific animation to keep the flip */
+@keyframes float-right {
+  0%, 100% {
+    transform: scaleX(-1) translateY(0px) rotate(10deg);
+  }
+  50% {
+    transform: scaleX(-1) translateY(-30px) rotate(12deg);
+  }
+}
+
+.ship-right {
+  animation-name: float-right;
+}
+
+
+.ship-left:hover,
+.ship-right:hover {
+  opacity: 0.7;
+  filter: drop-shadow(0 0 30px rgba(255, 255, 255, 0.5));
+}
+
+@media (max-width: 768px) {
+  .ship-decoration {
+    width: 120px;
+    bottom: 20px;
+  }
+  
+  .ship-left {
+    left: 10px;
+  }
+  
+  .ship-right {
+    right: 10px;
+  }
+}

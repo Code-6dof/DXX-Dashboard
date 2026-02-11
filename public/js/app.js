@@ -8,7 +8,8 @@
   "use strict";
 
   // ── State ──────────────────────────────────────────────────────
-  let games = [];
+  let allGames = []; // Full dataset
+  let games = []; // Currently loaded games (initially half)
   let players = [];
   let currentMode = "all";
   let currentPage = 1;
@@ -23,8 +24,10 @@
   async function loadGames() {
     const response = await fetch("./data/games.json");
     const data = await response.json();
-    games = data.games;
+    allGames = data.games; // Store full dataset
+    games = data.games.slice(0, Math.ceil(data.games.length / 2)); // Load half initially
     players = data.players;
+    console.log(`Loaded ${games.length} of ${allGames.length} games initially`);
     return games;
   }
 
@@ -68,6 +71,8 @@
   // ── Render Stats Bar ───────────────────────────────────────────
   function renderStatsBar(filtered) {
     const totalGamesEl = document.getElementById("totalGames");
+    if (!totalGamesEl) return; // Stats bar not present on this page
+
     totalGamesEl.textContent = filtered.length.toLocaleString();
     totalGamesEl.title = `${filtered.length} games`;
 
@@ -81,14 +86,16 @@
         });
       }
     });
-    document.getElementById("totalPlayers").textContent = uniquePlayers.size.toLocaleString();
-    document.getElementById("total1v1").textContent = filtered
-      .filter((g) => g.gameType === "1v1")
-      .length.toLocaleString();
-    document.getElementById("totalFFA").textContent = filtered
-      .filter((g) => g.gameType === "ffa")
-      .length.toLocaleString();
-    document.getElementById("totalKills").textContent = totalKills.toLocaleString();
+    
+    const totalPlayersEl = document.getElementById("totalPlayers");
+    const total1v1El = document.getElementById("total1v1");
+    const totalFFAEl = document.getElementById("totalFFA");
+    const totalKillsEl = document.getElementById("totalKills");
+    
+    if (totalPlayersEl) totalPlayersEl.textContent = uniquePlayers.size.toLocaleString();
+    if (total1v1El) total1v1El.textContent = filtered.filter((g) => g.gameType === "1v1").length.toLocaleString();
+    if (totalFFAEl) totalFFAEl.textContent = filtered.filter((g) => g.gameType === "ffa").length.toLocaleString();
+    if (totalKillsEl) totalKillsEl.textContent = totalKills.toLocaleString();
   }
 
   // ── Render Charts ──────────────────────────────────────────────
@@ -144,6 +151,18 @@
       }
     });
     DXXCharts.renderTopMaps(mapCounts);
+
+    // Day of week distribution
+    const dayCounts = {};
+    const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    filtered.forEach((g) => {
+      if (g.timestamp) {
+        const date = new Date(g.timestamp);
+        const dayName = dayNames[date.getDay()];
+        dayCounts[dayName] = (dayCounts[dayName] || 0) + 1;
+      }
+    });
+    DXXCharts.renderDayOfWeek(dayCounts);
   }
 
   // ── Render All Games Table ─────────────────────────────────────
@@ -436,9 +455,6 @@
     document.getElementById("allView").style.display = mode === "all" ? "" : "none";
     document.getElementById("duelView").style.display = mode === "1v1" ? "" : "none";
     document.getElementById("ffaView").style.display = mode === "ffa" ? "" : "none";
-    document.getElementById("statsView").style.display = mode === "stats" ? "" : "none";
-    document.getElementById("chartsSection").style.display = mode === "stats" ? "none" : "";
-    document.getElementById("filtersSection").style.display = mode === "stats" ? "none" : "";
 
     refresh();
   }
@@ -447,14 +463,11 @@
   function refresh() {
     const filtered = DXXFilters.getFiltered();
     renderStatsBar(filtered);
-
-    if (currentMode !== "stats") {
-      renderCharts(filtered);
-    }
+    renderCharts(filtered);
+    
     if (currentMode === "all") renderGamesTable(filtered);
     if (currentMode === "1v1") renderDuels(filtered);
     if (currentMode === "ffa") renderFFA(filtered);
-    if (currentMode === "stats") renderPlayerStats();
   }
 
   // ── Event Listeners ────────────────────────────────────────────
@@ -488,9 +501,16 @@
     }
   });
 
-  document.getElementById("playerSearch").addEventListener("input", () => {
-    renderPlayerStats();
-  });
+  // Chart toggle functionality
+  const toggleChartsBtn = document.getElementById("toggleCharts");
+  const chartsContainer = document.getElementById("chartsContainer");
+  if (toggleChartsBtn && chartsContainer) {
+    toggleChartsBtn.addEventListener("click", () => {
+      const isHidden = chartsContainer.style.display === "none";
+      chartsContainer.style.display = isHidden ? "" : "none";
+      toggleChartsBtn.textContent = isHidden ? "Hide Charts" : "Show Charts";
+    });
+  }
 
   // ── Initialize ─────────────────────────────────────────────────
   const overlay = document.getElementById("loadingOverlay");
@@ -505,13 +525,12 @@
       const newest = games[0];
       const startDate = formatDate(oldest.timestamp);
       const endDate = formatDate(newest.timestamp);
-      document.getElementById("datasetInfo").innerHTML = 
-        `📅 Dataset: ${startDate} to ${endDate} (${games.length.toLocaleString()} games)`;
+      console.log(`DXX Dashboard: Showing ${games.length} of ${allGames.length} games (${startDate} to ${endDate})`);
     }
     
     switchView("all");
 
-    console.log(`DXX Dashboard loaded: ${games.length} games, ${players.length} players.`);
+    console.log(`DXX Dashboard loaded: ${games.length} games shown, ${allGames.length} total, ${players.length} players.`);
   } catch (err) {
     console.error("Failed to load data:", err);
     document.getElementById("gamesBody").innerHTML =
