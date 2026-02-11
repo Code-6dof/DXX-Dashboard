@@ -375,7 +375,9 @@
         const count = (killMatrix[killer] && killMatrix[killer][victim]) || 0;
         const isSelf = killer === victim;
         const cls = isSelf ? 'km-self' : count > 0 ? 'km-has-kills' : 'km-zero';
-        cells += `<td class="km-cell ${cls}">${count || '-'}</td>`;
+        const intensity = Math.min(count / 5, 1); // scale for color intensity
+        const display = isSelf ? '—' : count > 0 ? count : '·';
+        cells += `<td class="km-cell ${cls}" style="--intensity: ${intensity}" title="${esc(killer)} killed ${esc(victim)} ${count} times">${display}</td>`;
       });
       rows += `<tr>${cells}</tr>`;
     });
@@ -391,7 +393,13 @@
           <tbody>${rows}</tbody>
         </table>
       </div>
-      <p class="gdm-matrix-hint">Rows = kills by player, columns = deaths. Diagonal = suicides.</p>`;
+      <p class="gdm-matrix-hint">
+        <strong>How to read:</strong> Each row shows kills BY that player, each column shows deaths OF that player.<br>
+        Example: Row "Alice" + Column "Bob" = times Alice killed Bob. 
+        <span style="color:var(--green)">● Green</span> = kills, 
+        <span style="color:var(--red)">— Dash</span> = self (diagonal), 
+        <span style="color:var(--text-dim)">· Dot</span> = no kills.
+      </p>`;
   }
 
   // ── Render: Timeline (derived from kill feed sequence) ──
