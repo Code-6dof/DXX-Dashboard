@@ -23,18 +23,19 @@ def load_games_data():
     global _games_cache, _games_cache_mtime
     
     try:
-        current_mtime = os.path.getmtime(GAMES_FILE)
-        
-        # Return cache if file hasn't changed
-        if _games_cache is not None and _games_cache_mtime == current_mtime:
+        # Return cache if already loaded (don't even check mtime on every request)
+        if _games_cache is not None:
             return _games_cache
         
-        # Load fresh data
+        # Load fresh data only on first call
         print(f"Loading games data from {GAMES_FILE}...")
+        import time
+        start = time.time()
         with open(GAMES_FILE, 'r') as f:
             _games_cache = json.load(f)
-        _games_cache_mtime = current_mtime
-        print(f"Loaded {len(_games_cache.get('games', []))} games into memory cache")
+        _games_cache_mtime = os.path.getmtime(GAMES_FILE)
+        elapsed = time.time() - start
+        print(f"Loaded {len(_games_cache.get('games', []))} games into memory cache ({elapsed:.2f}s)")
         return _games_cache
     except Exception as e:
         print(f"Error loading games data: {e}")
@@ -201,6 +202,15 @@ def shutdown_handler(sig, frame):
 if __name__ == '__main__':
     signal.signal(signal.SIGTERM, shutdown_handler)
     signal.signal(signal.SIGINT, shutdown_handler)
+    
+    # Pre-load games data into cache on startup
+    print("Pre-loading games data into cache...")
+    try:
+        load_games_data()
+        print("Cache initialized successfully")
+    except Exception as e:
+        print(f"Warning: Failed to pre-load cache: {e}")
+    
     with ReusableTCPServer(("", PORT), CORSRequestHandler) as httpd:
         print(f" Server running at http://localhost:{PORT}/")
         print(f" Serving directory: {DIRECTORY}")
