@@ -228,8 +228,8 @@
       const summary = footer.querySelector('.game-stats-summary');
       if (summary) {
         summary.innerHTML = `
-          <span>💀 ${game.totalKills || 0}</span>
-          ${game.totalDeaths ? `<span>☠️ ${game.totalDeaths}</span>` : ''}`;
+          <span>${game.totalKills || 0} kills</span>
+          ${game.totalDeaths ? `<span>${game.totalDeaths} deaths</span>` : ''}`;
       }
     }
   }
@@ -277,8 +277,8 @@
         <div class="game-card-footer">
           <span class="kill-feed-preview">${esc(lastKill)}</span>
           <span class="game-stats-summary">
-            <span>💀 ${game.totalKills || 0}</span>
-            ${game.totalDeaths ? `<span>☠️ ${game.totalDeaths}</span>` : ''}
+            <span>${game.totalKills || 0} kills</span>
+            ${game.totalDeaths ? `<span>${game.totalDeaths} deaths</span>` : ''}
           </span>
         </div>
       </div>`;

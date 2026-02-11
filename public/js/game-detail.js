@@ -156,7 +156,7 @@ const GameDetail = (function () {
               <span class="mode-badge ${modeClass}">${modeLabel}</span>
               <span class="version-badge ${versionClass}">${esc(game.version || "—")}</span>
               <span class="gdm-date">${formatDateTime(game.timestamp)}</span>
-              ${game.timeElapsed ? `<span class="gdm-duration">⏱ ${esc(game.timeElapsed)}</span>` : ""}
+              ${game.timeElapsed ? `<span class="gdm-duration">${esc(game.timeElapsed)}</span>` : ""}
               ${game.gameName ? `<span class="gdm-gamename">${esc(game.gameName)}</span>` : ""}
             </div>
           </div>
@@ -175,11 +175,11 @@ const GameDetail = (function () {
     if (eventData) {
       html += `
       <div class="gdm-tabs" id="gdmTabs">
-        <button class="gdm-tab active" data-panel="killFeed"> Kill Feed</button>
-        <button class="gdm-tab" data-panel="killMatrix"> Kill Matrix</button>
-        ${eventData.damageBreakdown && eventData.damageBreakdown.length > 0 ? `<button class="gdm-tab" data-panel="damage">💥 Damage</button>` : ""}
-        <button class="gdm-tab" data-panel="timeline"> Timeline</button>
-        ${eventData.chatLog && eventData.chatLog.length > 0 ? `<button class="gdm-tab" data-panel="chat">💬 Chat</button>` : ""}
+        <button class="gdm-tab active" data-panel="killFeed">Kill Feed</button>
+        <button class="gdm-tab" data-panel="killMatrix">Kill Matrix</button>
+        ${eventData.damageBreakdown && eventData.damageBreakdown.length > 0 ? `<button class="gdm-tab" data-panel="damage">Damage</button>` : ""}
+        <button class="gdm-tab" data-panel="timeline">Timeline</button>
+        ${eventData.chatLog && eventData.chatLog.length > 0 ? `<button class="gdm-tab" data-panel="chat">Chat</button>` : ""}
       </div>
 
       <!-- Kill Feed -->
@@ -227,13 +227,13 @@ const GameDetail = (function () {
       if (hasSample) {
         html += `
       <div class="gdm-notice">
-        <p>ℹ️ This is <strong>sample data</strong> for demonstration. Run the gamelog watcher to capture real game events.</p>
+        <p>ℹ This is <strong>sample data</strong> for demonstration. Run the gamelog watcher to capture real game events.</p>
       </div>`;
       }
     } else {
       html += `
       <div class="gdm-notice">
-        <p>📝 Detailed event data (kill feed, damage, timeline) is not available for this game.</p>
+        <p>Detailed event data (kill feed, damage, timeline) is not available for this game.</p>
         <p>To capture events for new games, run <code>node scraper/gamelog-watcher.js</code> while DXX-Redux is running with <code>-gamelog_split -gamelog_timestamp</code> flags.</p>
       </div>`;
     }
@@ -247,7 +247,7 @@ const GameDetail = (function () {
       return '<p class="gdm-empty">No player data.</p>';
     }
 
-    const medals = ["🥇", "🥈", "🥉"];
+    const medals = ["#1", "#2", "#3"];
 
     if (gameType === "1v1" && players.length === 2) {
       const p1 = players[0];
@@ -258,16 +258,16 @@ const GameDetail = (function () {
       return `
         <div class="gdm-duel-scoreboard">
           <div class="gdm-duel-player ${tied ? "" : p1Wins ? "winner" : "loser"}">
-            <div class="gdm-duel-name">${p1Wins && !tied ? "" : ""}${esc(p1.name)}</div>
+            <div class="gdm-duel-name">${esc(p1.name)}</div>
             <div class="gdm-duel-score">${p1.kills}</div>
-            <div class="gdm-duel-sub">${p1.deaths}D · ${p1.suicides || 0}S</div>
+            <div class="gdm-duel-sub">${p1.deaths}D / ${p1.suicides || 0}S</div>
             ${p1.kdRatio ? `<div class="gdm-duel-kd">${p1.kdRatio} K/D</div>` : ""}
           </div>
           <div class="gdm-duel-divider">VS</div>
           <div class="gdm-duel-player ${tied ? "" : !p1Wins ? "winner" : "loser"}">
-            <div class="gdm-duel-name">${!p1Wins && !tied ? "" : ""}${esc(p2.name)}</div>
+            <div class="gdm-duel-name">${esc(p2.name)}</div>
             <div class="gdm-duel-score">${p2.kills}</div>
-            <div class="gdm-duel-sub">${p2.deaths}D · ${p2.suicides || 0}S</div>
+            <div class="gdm-duel-sub">${p2.deaths}D / ${p2.suicides || 0}S</div>
             ${p2.kdRatio ? `<div class="gdm-duel-kd">${p2.kdRatio} K/D</div>` : ""}
           </div>
         </div>`;
@@ -316,10 +316,10 @@ const GameDetail = (function () {
     const items = killFeed.map((k) => {
       const timeStr = k.time ? `<span class="kf-time">${esc(k.time)}</span>` : "";
       let icon = "";
-      if (k.method && k.method.toLowerCase().includes("mine")) icon = "💣";
-      if (k.method && k.method.toLowerCase().includes("missile")) icon = "🚀";
+      if (k.method && k.method.toLowerCase().includes("mine")) icon = "";
+      if (k.method && k.method.toLowerCase().includes("missile")) icon = "";
       if (k.method && k.method.toLowerCase().includes("fusion")) icon = "";
-      if (k.method && k.method.toLowerCase().includes("laser")) icon = "🔫";
+      if (k.method && k.method.toLowerCase().includes("laser")) icon = "";
       if (k.killer === k.victim || !k.killer) icon = "";
 
       return `
@@ -333,7 +333,7 @@ const GameDetail = (function () {
 
     return `
       <div class="gdm-kill-feed-header">
-        <span> Kill Feed</span>
+        <span>Kill Feed</span>
         <span class="kf-count">${killFeed.length} kills</span>
       </div>
       <div class="gdm-kill-feed">${items}</div>`;
@@ -450,18 +450,18 @@ const GameDetail = (function () {
       kill: "",
       death: "",
       suicide: "",
-      join: "",
-      leave: "",
-      disconnect: "",
-      reactor: "💥",
-      escape: "🚀",
-      chat: "💬",
-      flag: "🚩",
-      orb: "🔮",
-      damage: "💢",
-      promotion: "⬆️",
-      demotion: "⬇️",
-      start: "🎮",
+      join: "+",
+      leave: "-",
+      disconnect: "x",
+      reactor: "!",
+      escape: ">",
+      chat: "",
+      flag: "",
+      orb: "",
+      damage: "",
+      promotion: "",
+      demotion: "",
+      start: "",
       end: "",
     };
 
@@ -478,7 +478,7 @@ const GameDetail = (function () {
 
     return `
       <div class="gdm-timeline-header">
-        <span> Event Timeline</span>
+        <span>Event Timeline</span>
         <span class="tl-count">${timeline.length} events</span>
       </div>
       <div class="gdm-timeline">${items}</div>`;
@@ -500,7 +500,7 @@ const GameDetail = (function () {
 
     return `
       <div class="gdm-chat-header">
-        <span>💬 Chat Log</span>
+        <span>Chat Log</span>
         <span class="chat-count">${chatLog.length} messages</span>
       </div>
       <div class="gdm-chat-log">${items}</div>`;

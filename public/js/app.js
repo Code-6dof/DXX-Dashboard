@@ -292,7 +292,7 @@
       return;
     }
 
-    const medals = ["🥇", "🥈", "🥉"];
+    const medals = ["#1", "#2", "#3"];
 
     page.forEach((g, idx) => {
       const sorted = [...(g.players || [])].sort((a, b) => b.kills - a.kills);

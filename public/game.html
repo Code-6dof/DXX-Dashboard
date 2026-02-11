@@ -18,7 +18,7 @@
         <span>DXX Tracker</span>
       </div>
       <div class="nav-links">
-        <a href="index.html" class="nav-link">� Archive</a>
+        <a href="index.html" class="nav-link">Archive</a>
         <a href="live.html" class="nav-link">Live Games</a>
       </div>
     </div>
@@ -37,7 +37,7 @@
         <div class="pulse-ring"></div>
         <div class="pulse-ring delay-1"></div>
         <div class="pulse-ring delay-2"></div>
-        <span class="waiting-icon">🎮</span>
+        <span class="waiting-icon"></span>
       </div>
       <h3>Loading game…</h3>
       <p>Fetching live game data</p>
@@ -45,7 +45,7 @@
 
     <!-- Game not found state -->
     <div class="game-page-not-found" id="gameNotFound" style="display:none">
-      <h3>😕 Game Not Found</h3>
+      <h3>Game Not Found</h3>
       <p>This game may have ended or the ID is invalid.</p>
       <a href="index.html" class="game-page-home-link">← Return to Live Games</a>
     </div>
@@ -63,14 +63,22 @@
 
       <!-- Tabs -->
       <div class="gdm-tabs" id="gameTabs" style="display:none">
-        <button class="gdm-tab active" data-panel="events">Kill Events</button>
+        <button class="gdm-tab active" data-panel="killFeed">Kill Feed</button>
+        <button class="gdm-tab" data-panel="killMatrix">Kill Matrix</button>
+        <button class="gdm-tab" data-panel="timeline">Timeline</button>
         <button class="gdm-tab" data-panel="damage">Damage</button>
         <button class="gdm-tab" data-panel="chat">Chat</button>
       </div>
 
       <!-- Tab Panels -->
-      <div class="gdm-panel active" id="panel-events">
-        <div class="gdm-section" id="eventsContent"></div>
+      <div class="gdm-panel active" id="panel-killFeed">
+        <div class="gdm-section" id="killFeedContent"></div>
+      </div>
+      <div class="gdm-panel" id="panel-killMatrix">
+        <div class="gdm-section" id="killMatrixContent"></div>
+      </div>
+      <div class="gdm-panel" id="panel-timeline">
+        <div class="gdm-section" id="timelineContent"></div>
       </div>
       <div class="gdm-panel" id="panel-damage">
         <div class="gdm-section" id="damageContent"></div>

@@ -27,7 +27,9 @@
   const contentEl   = document.getElementById('gameContent');
   const headerEl    = document.getElementById('gameHeader');
   const scoreboardEl = document.getElementById('scoreboardContent');
-  const eventsEl    = document.getElementById('eventsContent');
+  const killFeedEl  = document.getElementById('killFeedContent');
+  const killMatrixEl = document.getElementById('killMatrixContent');
+  const timelineEl  = document.getElementById('timelineContent');
   const damageEl    = document.getElementById('damageContent');
   const chatEl      = document.getElementById('chatContent');
   const tabsEl      = document.getElementById('gameTabs');
@@ -134,10 +136,11 @@
     scoreboardEl.innerHTML = renderScoreboard(players, gameType);
 
     // Event data panels
-    const hasKillEvents = game.killFeed && game.killFeed.length > 0;
+    const hasKillFeed = game.killFeed && game.killFeed.length > 0;
+    const hasMatrix = game.killMatrix && Object.keys(game.killMatrix).length > 0;
     const hasDamage = game.damageBreakdown && game.damageBreakdown.length > 0;
     const hasChat = game.chatLog && game.chatLog.length > 0;
-    const hasAnyEvents = hasKillEvents || hasDamage || hasChat;
+    const hasAnyEvents = hasKillFeed || hasMatrix || hasDamage || hasChat;
 
     if (hasAnyEvents) {
       tabsEl.style.display = 'flex';
@@ -145,28 +148,31 @@
       // Show/hide tab buttons based on available data
       tabsEl.querySelectorAll('.gdm-tab').forEach(tab => {
         const panel = tab.dataset.panel;
-        if (panel === 'damage' && !hasDamage) tab.style.display = 'none';
+        if (panel === 'killFeed' && !hasKillFeed) tab.style.display = 'none';
+        else if (panel === 'killMatrix' && !hasMatrix) tab.style.display = 'none';
+        else if (panel === 'timeline' && !hasKillFeed) tab.style.display = 'none';
+        else if (panel === 'damage' && !hasDamage) tab.style.display = 'none';
         else if (panel === 'chat' && !hasChat) tab.style.display = 'none';
         else tab.style.display = '';
       });
 
-      eventsEl.innerHTML = renderKillEvents(game.killFeed || [], game.killMatrix || {}, players);
+      killFeedEl.innerHTML = renderKillFeed(game.killFeed || []);
+      killMatrixEl.innerHTML = renderKillMatrix(game.killMatrix || {}, players);
+      timelineEl.innerHTML = renderTimeline(game.killFeed || []);
       damageEl.innerHTML = renderDamageBreakdown(game.damageBreakdown || [], players);
       chatEl.innerHTML = renderChatLog(game.chatLog || []);
     } else {
       tabsEl.style.display = 'none';
-      eventsEl.innerHTML = `
+      killFeedEl.innerHTML = `
         <div class="gamelog-status-notice">
-          <h4>📝 Live Event Feed</h4>
-          <p>No gamelog events yet. Events (kills, deaths, chat) appear here <strong>in real-time</strong> as they happen during the game — you don't have to wait for the game to end.</p>
+          <h4>Live Event Feed</h4>
+          <p>No gamelog events yet. Events (kills, deaths, chat) appear here <strong>in real-time</strong> as they happen during the game.</p>
           <details>
             <summary>Not seeing events?</summary>
             <ul>
               <li>The tracker watches <code>~/.d1x-redux/gamelog.txt</code> and <code>~/.d2x-redux/gamelog.txt</code></li>
-              <li>DXX-Redux writes to gamelog.txt as you play — kills, deaths, and chat all appear live</li>
+              <li>DXX-Redux writes to gamelog.txt as you play</li>
               <li>Make sure the tracker (<code>node scraper/udp-tracker.js</code>) is running</li>
-              <li>You can set <code>LOCAL_PLAYER=YourName</code> env var to replace "You" with your name</li>
-              <li>Other players can upload their gamelog via <code>POST /api/gamelog</code> on port 9998 to merge perspectives</li>
             </ul>
           </details>
         </div>`;
@@ -190,7 +196,7 @@
             ${game.host ? `<span class="game-page-meta-item">${esc(game.host)}:${game.port}</span>` : ''}
           </div>
         </div>
-        <span class="live-badge">🔴 LIVE</span>
+        <span class="live-badge">LIVE</span>
       </div>`;
   }
 
@@ -200,7 +206,7 @@
       return '<p class="gdm-empty">Waiting for players…</p>';
     }
 
-    const medals = ['🥇', '🥈', '🥉'];
+    const medals = ['#1', '#2', '#3'];
 
     if (gameType === '1v1' && players.length === 2) {
       const p1 = players[0];
@@ -211,15 +217,15 @@
       return `
         <div class="gdm-duel-scoreboard">
           <div class="gdm-duel-player ${tied ? '' : p1Wins ? 'winner' : 'loser'}">
-            <div class="gdm-duel-name">${p1Wins && !tied ? '' : ''}${esc(p1.name)}</div>
+            <div class="gdm-duel-name">${esc(p1.name)}</div>
             <div class="gdm-duel-score">${p1.kills || 0}</div>
-            <div class="gdm-duel-sub">${p1.deaths || 0}D · ${p1.suicides || 0}S</div>
+            <div class="gdm-duel-sub">${p1.deaths || 0}D / ${p1.suicides || 0}S</div>
           </div>
           <div class="gdm-duel-divider">VS</div>
           <div class="gdm-duel-player ${tied ? '' : !p1Wins ? 'winner' : 'loser'}">
-            <div class="gdm-duel-name">${!p1Wins && !tied ? '' : ''}${esc(p2.name)}</div>
+            <div class="gdm-duel-name">${esc(p2.name)}</div>
             <div class="gdm-duel-score">${p2.kills || 0}</div>
-            <div class="gdm-duel-sub">${p2.deaths || 0}D · ${p2.suicides || 0}S</div>
+            <div class="gdm-duel-sub">${p2.deaths || 0}D / ${p2.suicides || 0}S</div>
           </div>
         </div>`;
     }
@@ -258,93 +264,99 @@
       </table>`;
   }
 
-  // ── Render: Kill Events (Timeline + Matrix Unified) ──
-  function renderKillEvents(killFeed, killMatrix, players) {
-    const hasKillFeed = killFeed && killFeed.length > 0;
-    const hasMatrix = killMatrix && Object.keys(killMatrix).length > 0;
-    
-    if (!hasKillFeed && !hasMatrix) {
-      return '<p class="gdm-empty">No kill events recorded.</p>';
+  // ── Render: Kill Feed ──
+  function renderKillFeed(killFeed) {
+    if (!killFeed || killFeed.length === 0) {
+      return '<p class="gdm-empty">No kills recorded.</p>';
     }
 
-    let html = '';
-
-    // Kill Timeline (chronological sequence)
-    if (hasKillFeed) {
-      const items = killFeed.map((k, idx) => {
-        const timeStr = k.time ? `<span class="kf-time">${esc(typeof k.time === 'string' ? k.time : '')}</span>` : `<span class="kf-time">#${idx + 1}</span>`;
-        let icon = '💀';
-        if (k.method) {
-          const m = k.method.toLowerCase();
-          if (m.includes('mine') || m.includes('bomb')) icon = '💣';
-          else if (m.includes('missile') || m.includes('homer') || m.includes('smart')) icon = '🚀';
-          else if (m.includes('fusion') || m.includes('helix')) icon = '⚡';
-          else if (m.includes('laser') || m.includes('vulcan')) icon = '🔫';
-          else if (m.includes('mega')) icon = '💥';
-          else if (m.includes('plasma')) icon = '🔵';
-        }
-        if (k.killer === k.victim || !k.killer) icon = '☠️'; // suicide
-
-        const isSuicide = k.killer === k.victim || !k.killer;
-        const killClass = isSuicide ? 'kf-suicide' : 'kf-kill';
-
-        return `
-          <div class="kf-entry ${killClass}">
-            ${timeStr}
-            <span class="kf-icon">${icon}</span>
-            <span class="kf-msg">${esc(k.message || `${k.killer || ''} killed ${k.victim || ''}`)}</span>
-            ${k.method ? `<span class="kf-method">${esc(k.method)}</span>` : ''}
-          </div>`;
-      }).join('');
-
-      html += `
-        <div class="kill-events-section">
-          <div class="gdm-kill-feed-header">
-            <span>⚔️ Kill Timeline</span>
-            <span class="kf-count">${killFeed.length} kills</span>
-          </div>
-          <div class="gdm-kill-feed">${items}</div>
+    const items = killFeed.map((k, idx) => {
+      const timeStr = k.time
+        ? `<span class="kf-time">${esc(typeof k.time === 'string' ? k.time : '')}</span>`
+        : `<span class="kf-time">#${idx + 1}</span>`;
+      const isSuicide = k.killer === k.victim || !k.killer;
+      const killClass = isSuicide ? 'kf-suicide' : 'kf-kill';
+      return `
+        <div class="kf-entry ${killClass}">
+          ${timeStr}
+          <span class="kf-msg">${esc(k.message || `${k.killer || ''} killed ${k.victim || ''}`)}</span>
+          ${k.method ? `<span class="kf-method">${esc(k.method)}</span>` : ''}
         </div>`;
+    }).join('');
+
+    return `
+      <div class="gdm-kill-feed-header">
+        <span>Kill Feed</span>
+        <span class="kf-count">${killFeed.length} kills</span>
+      </div>
+      <div class="gdm-kill-feed">${items}</div>`;
+  }
+
+  // ── Render: Kill Matrix ──
+  function renderKillMatrix(killMatrix, players) {
+    if (!killMatrix || Object.keys(killMatrix).length === 0 || !players || players.length === 0) {
+      return '<p class="gdm-empty">No kill matrix data.</p>';
     }
 
-    // Kill Matrix (who killed whom)
-    if (hasMatrix && players.length > 0) {
-      const names = players.map(p => p.name);
-      let headerCells = '<th class="km-corner">Killer ↓ Victim →</th>';
-      names.forEach(n => {
-        headerCells += `<th class="km-name">${esc(n.length > 12 ? n.slice(0, 10) + '…' : n)}</th>`;
-      });
+    const names = players.map(p => p.name);
+    let headerCells = '<th class="km-corner">Killer / Victim</th>';
+    names.forEach(n => {
+      headerCells += `<th class="km-name">${esc(n.length > 12 ? n.slice(0, 10) + '...' : n)}</th>`;
+    });
 
-      let rows = '';
-      names.forEach(killer => {
-        let cells = `<td class="km-row-name"><strong>${esc(killer)}</strong></td>`;
-        names.forEach(victim => {
-          const count = (killMatrix[killer] && killMatrix[killer][victim]) || 0;
-          const isSelf = killer === victim;
-          const cls = isSelf ? 'km-self' : count > 0 ? 'km-has-kills' : 'km-zero';
-          const intensity = Math.min(count / 10, 1);
-          cells += `<td class="km-cell ${cls}" style="--intensity: ${intensity}">${count || '·'}</td>`;
-        });
-        rows += `<tr>${cells}</tr>`;
+    let rows = '';
+    names.forEach(killer => {
+      let cells = `<td class="km-row-name"><strong>${esc(killer)}</strong></td>`;
+      names.forEach(victim => {
+        const count = (killMatrix[killer] && killMatrix[killer][victim]) || 0;
+        const isSelf = killer === victim;
+        const cls = isSelf ? 'km-self' : count > 0 ? 'km-has-kills' : 'km-zero';
+        cells += `<td class="km-cell ${cls}">${count || '-'}</td>`;
       });
+      rows += `<tr>${cells}</tr>`;
+    });
 
-      html += `
-        <div class="kill-events-section" style="margin-top: 2rem;">
-          <div class="gdm-kill-feed-header">
-            <span>🎯 Kill Matrix</span>
-            <span class="kf-count">Head-to-head breakdown</span>
-          </div>
-          <div class="gdm-kill-matrix-wrap">
-            <table class="gdm-kill-matrix">
-              <thead><tr>${headerCells}</tr></thead>
-              <tbody>${rows}</tbody>
-            </table>
-          </div>
-          <p class="gdm-matrix-hint">Rows show kills by player, columns show deaths. Diagonal = suicides.</p>
+    return `
+      <div class="gdm-kill-feed-header">
+        <span>Kill Matrix</span>
+        <span class="kf-count">Head-to-head breakdown</span>
+      </div>
+      <div class="gdm-kill-matrix-wrap">
+        <table class="gdm-kill-matrix">
+          <thead><tr>${headerCells}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <p class="gdm-matrix-hint">Rows = kills by player, columns = deaths. Diagonal = suicides.</p>`;
+  }
+
+  // ── Render: Timeline (derived from kill feed sequence) ──
+  function renderTimeline(killFeed) {
+    if (!killFeed || killFeed.length === 0) {
+      return '<p class="gdm-empty">No timeline events.</p>';
+    }
+
+    const items = killFeed.map((k, idx) => {
+      const timeStr = k.time || `#${idx + 1}`;
+      const isSuicide = k.killer === k.victim || !k.killer;
+      const typeClass = isSuicide ? 'tl-kill tl-suicide' : 'tl-kill';
+      const desc = k.message || (isSuicide
+        ? `${k.victim || 'Unknown'} died`
+        : `${k.killer || '?'} killed ${k.victim || '?'}`);
+
+      return `
+        <div class="tl-entry ${typeClass}">
+          <span class="tl-time">${esc(timeStr)}</span>
+          <span class="tl-desc">${esc(desc)}${k.method ? ` [${esc(k.method)}]` : ''}</span>
         </div>`;
-    }
+    }).join('');
 
-    return html;
+    return `
+      <div class="gdm-timeline-header">
+        <span>Timeline</span>
+        <span class="tl-count">${killFeed.length} events</span>
+      </div>
+      <div class="gdm-timeline">${items}</div>`;
   }
 
   // ── Render: Damage Breakdown ──
@@ -392,7 +404,7 @@
 
     return `
       <div class="gdm-chat-header">
-        <span>💬 Chat Log</span>
+        <span>Chat Log</span>
         <span class="chat-count">${chatLog.length} messages</span>
       </div>
       <div class="gdm-chat-log">${items}</div>`;
