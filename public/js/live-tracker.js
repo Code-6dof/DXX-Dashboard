@@ -92,18 +92,26 @@
       for (const oldId of knownGameIds) {
         if (!incomingIds.has(oldId)) {
           const removed = activeGames.get(oldId);
-          activeGames.delete(oldId);
           if (removed) {
-            recentGames.unshift(removed);
-            if (recentGames.length > MAX_RECENT_GAMES) recentGames.length = MAX_RECENT_GAMES;
+            activeGames.delete(oldId);
+            // Only add to recent if it's not already there
+            const alreadyRecent = recentGames.some(g => g.id === removed.id);
+            if (!alreadyRecent) {
+              recentGames.unshift(removed);
+              if (recentGames.length > MAX_RECENT_GAMES) recentGames.length = MAX_RECENT_GAMES;
+            }
           }
         }
       }
 
-      // If incoming has zero games, clear all active
-      if (!data.games || data.games.length === 0) {
+      // If incoming has zero games but we had games before, move them to recent
+      // BUT only if the file is actually empty and we got a successful response
+      if ((!data.games || data.games.length === 0) && knownGameIds.size > 0) {
         for (const [id, g] of activeGames) {
-          recentGames.unshift(g);
+          const alreadyRecent = recentGames.some(rg => rg.id === g.id);
+          if (!alreadyRecent) {
+            recentGames.unshift(g);
+          }
         }
         activeGames.clear();
         if (recentGames.length > MAX_RECENT_GAMES) recentGames.length = MAX_RECENT_GAMES;
