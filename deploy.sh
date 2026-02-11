@@ -94,23 +94,47 @@ info "Restarting services on VM..."
 ssh $SSH_OPTS "${VM_USER}@${VM_HOST}" bash -s <<'REMOTE'
   cd /home/ubuntu/DXX-Dashboard
 
-  # Kill old serve.py and wait for port to free
+  # Kill old serve.py — SIGTERM then SIGKILL
+  pkill -f 'python3 serve.py' 2>/dev/null || true
+  sleep 1
   pkill -9 -f 'python3 serve.py' 2>/dev/null || true
-  for i in 1 2 3 4 5; do
-    ss -tlnp | grep -q ':8080' || break
-    sleep 1
-  done
-  nohup python3 serve.py > /dev/null 2>&1 &
-  echo "  ✓ serve.py restarted (PID $!)"
-
-  # Kill old tracker and wait for port to free
+  
+  # Kill old tracker
+  pkill -f 'node scraper/udp-tracker.js' 2>/dev/null || true
+  sleep 1
   pkill -9 -f 'node scraper/udp-tracker.js' 2>/dev/null || true
+  
+  # Wait for ports to fully release
   for i in 1 2 3 4 5; do
-    ss -ulnp | grep -q ':9999' || break
+    BUSY=""
+    ss -tlnp 2>/dev/null | grep -q ':8080' && BUSY="8080 "
+    ss -ulnp 2>/dev/null | grep -q ':9999' && BUSY="${BUSY}9999"
+    [ -z "$BUSY" ] && break
+    echo "  Waiting for ports ${BUSY}..."
     sleep 1
   done
+
+  # Start serve.py
+  nohup python3 serve.py > serve.log 2>&1 &
+  SERVE_PID=$!
+  sleep 1
+  if kill -0 $SERVE_PID 2>/dev/null; then
+    echo "  ✓ serve.py running (PID $SERVE_PID)"
+  else
+    echo "  ✗ serve.py failed — check serve.log"
+    cat serve.log 2>/dev/null | tail -5
+  fi
+
+  # Start tracker
   nohup node scraper/udp-tracker.js > tracker.log 2>&1 &
-  echo "  ✓ udp-tracker.js restarted (PID $!)"
+  TRACK_PID=$!
+  sleep 1
+  if kill -0 $TRACK_PID 2>/dev/null; then
+    echo "  ✓ udp-tracker.js running (PID $TRACK_PID)"
+  else
+    echo "  ✗ udp-tracker.js failed — check tracker.log"
+    cat tracker.log 2>/dev/null | tail -5
+  fi
 
   # Check cloudflared — if it's not running, start it
   if ! pgrep -f 'cloudflared tunnel' > /dev/null; then
