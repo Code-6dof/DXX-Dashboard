@@ -224,6 +224,7 @@ function handleRegister(packet, rinfo) {
     players: [],
     confirmed: false,
     _broadcasted: false,
+    startTime: Date.now(), // Track when game started
   };
 
   g.id = key;
@@ -238,6 +239,11 @@ function handleRegister(packet, rinfo) {
   g.registerPort = rinfo.port;
   g.lastSeen = Date.now();
   g.pendingInfoReqs = 0;
+  
+  // Preserve startTime for existing games
+  if (!isNew && !g.startTime) {
+    g.startTime = Date.now();
+  }
 
   activeGames.set(key, g);
 
@@ -907,6 +913,13 @@ function archiveGameToHistory(g) {
       return base;
     });
 
+    // Calculate game duration
+    const startTime = g.startTime || now.getTime();
+    const durationMs = now.getTime() - startTime;
+    const minutes = Math.floor(durationMs / 60000);
+    const seconds = Math.floor((durationMs % 60000) / 1000);
+    const timeElapsed = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+
     const gameEntry = {
       id: gameId,
       filename: `live-${g.id || 'unknown'}`,
@@ -919,7 +932,7 @@ function archiveGameToHistory(g) {
       mode: g.gameMode || 'Anarchy',
       version: g.version === 1 ? 'D1X' : g.version === 2 ? 'D2X' : `v${g.releaseMajor || 0}.${g.releaseMinor || 0}.${g.releaseMicro || 0}`,
       difficulty: ['Trainee', 'Rookie', 'Hotshot', 'Ace', 'Insane'][g.difficulty] || 'Unknown',
-      timeElapsed: '',
+      timeElapsed: timeElapsed,
       killGoal: '',
       reactorLife: '',
       maxTime: '',
