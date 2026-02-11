@@ -10,8 +10,12 @@ set -euo pipefail
 # ── Config ───────────────────────────────────────────────────
 VM_USER="root"
 VM_HOST="192.210.140.94"
+VM_PASS="9n4AgCKyzHCl7N903k"
 VM_DIR="/root/DXX-Dashboard"
 SSH_OPTS="-o StrictHostKeyChecking=no -o ConnectTimeout=10"
+SSH_CMD="sshpass -p '$VM_PASS' ssh $SSH_OPTS"
+SCP_CMD="sshpass -p '$VM_PASS' scp"
+RSYNC_CMD="sshpass -p '$VM_PASS' rsync -e 'ssh $SSH_OPTS'"
 BRANCH="main"
 
 # Colors
@@ -69,8 +73,7 @@ echo ""
 info "Syncing to VM ${VM_HOST}..."
 
 # Rsync the project files (exclude stuff the VM doesn't need / shouldn't overwrite)
-rsync -avz --delete \
-  -e "ssh $SSH_OPTS" \
+eval "$RSYNC_CMD" -avz --delete \
   --exclude '.git/' \
   --exclude 'node_modules/' \
   --exclude '.env' \
@@ -90,7 +93,7 @@ ok "Files synced to VM"
 echo ""
 info "Restarting services on VM..."
 
-ssh $SSH_OPTS "${VM_USER}@${VM_HOST}" bash -s <<'REMOTE'
+eval "$SSH_CMD" "${VM_USER}@${VM_HOST}" bash -s <<'REMOTE'
   cd ${VM_DIR:-/root/DXX-Dashboard}
 
   # Kill old serve.py — SIGTERM then SIGKILL
