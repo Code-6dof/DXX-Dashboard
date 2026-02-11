@@ -8,11 +8,10 @@
 set -euo pipefail
 
 # ── Config ───────────────────────────────────────────────────
-VM_USER="ubuntu"
-VM_HOST="129.80.20.218"
-VM_DIR="/home/ubuntu/DXX-Dashboard"
-SSH_KEY="/home/malachi/Documents/ssh-key-2026-02-10.key"
-SSH_OPTS="-i $SSH_KEY -o StrictHostKeyChecking=no -o ConnectTimeout=10"
+VM_USER="root"
+VM_HOST="192.210.140.94"
+VM_DIR="/root/DXX-Dashboard"
+SSH_OPTS="-o StrictHostKeyChecking=no -o ConnectTimeout=10"
 BRANCH="main"
 
 # Colors
