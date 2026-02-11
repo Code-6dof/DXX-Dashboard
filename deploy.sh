@@ -91,7 +91,7 @@ echo ""
 info "Restarting services on VM..."
 
 ssh $SSH_OPTS "${VM_USER}@${VM_HOST}" bash -s <<'REMOTE'
-  cd /home/ubuntu/DXX-Dashboard
+  cd ${VM_DIR:-/root/DXX-Dashboard}
 
   # Kill old serve.py — SIGTERM then SIGKILL
   pkill -f 'python3 serve.py' 2>/dev/null || true
