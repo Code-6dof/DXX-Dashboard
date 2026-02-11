@@ -14,6 +14,32 @@ PORT = 8080
 DIRECTORY = "public"
 GAMES_FILE = os.path.join(DIRECTORY, "data", "games.json")
 
+# Cache the games data in memory
+_games_cache = None
+_games_cache_mtime = None
+
+def load_games_data():
+    """Load games.json and cache it in memory"""
+    global _games_cache, _games_cache_mtime
+    
+    try:
+        current_mtime = os.path.getmtime(GAMES_FILE)
+        
+        # Return cache if file hasn't changed
+        if _games_cache is not None and _games_cache_mtime == current_mtime:
+            return _games_cache
+        
+        # Load fresh data
+        print(f"Loading games data from {GAMES_FILE}...")
+        with open(GAMES_FILE, 'r') as f:
+            _games_cache = json.load(f)
+        _games_cache_mtime = current_mtime
+        print(f"Loaded {len(_games_cache.get('games', []))} games into memory cache")
+        return _games_cache
+    except Exception as e:
+        print(f"Error loading games data: {e}")
+        raise
+
 class ReusableTCPServer(socketserver.TCPServer):
     allow_reuse_address = True
     allow_reuse_port = True
@@ -53,8 +79,7 @@ class CORSRequestHandler(http.server.SimpleHTTPRequestHandler):
     def handle_single_game(self, game_id):
         """Return a single game by ID"""
         try:
-            with open(GAMES_FILE, 'r') as f:
-                data = json.load(f)
+            data = load_games_data()
             
             games = data.get('games', [])
             
@@ -97,8 +122,7 @@ class CORSRequestHandler(http.server.SimpleHTTPRequestHandler):
     def handle_games_meta(self):
         """Return metadata: total games count, total players, etc."""
         try:
-            with open(GAMES_FILE, 'r') as f:
-                data = json.load(f)
+            data = load_games_data()
             
             games = data.get('games', [])
             players = data.get('players', [])
@@ -134,8 +158,7 @@ class CORSRequestHandler(http.server.SimpleHTTPRequestHandler):
             # Limit max page size
             limit = min(limit, 500)
             
-            with open(GAMES_FILE, 'r') as f:
-                data = json.load(f)
+            data = load_games_data()
             
             games = data.get('games', [])
             players = data.get('players', [])

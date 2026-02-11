@@ -102,9 +102,6 @@
       notFoundEl.style.display = 'block';
     }
   }
-      notFoundEl.style.display = 'block';
-    }
-  }
 
   // ── Poll Loop ──
   async function poll() {
