@@ -66,35 +66,26 @@
     try {
       console.log('Loading from archive...');
       loadingTitle.textContent = 'Loading from archive...';
-      loadingMessage.textContent = 'Downloading game archive';
-      loadingProgress.textContent = 'This may take a moment for large archives';
-      
-      const resp = await fetch(ARCHIVE_URL + '?t=' + Date.now());
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      
-      loadingMessage.textContent = 'Parsing game data...';
-      const data = await resp.json();
-      
       loadingMessage.textContent = 'Searching for game...';
-      loadingProgress.textContent = `Searching ${data.games.length.toLocaleString()} archived games`;
+      loadingProgress.textContent = 'Fetching game from archive';
       
-      // Try multiple matching strategies
-      let game = data.games.find(g => g.id === gameId);
+      // Use new API endpoint for single game lookup
+      const resp = await fetch(`/api/games/${encodeURIComponent(gameId)}?t=${Date.now()}`);
       
-      // If not found by ID, try matching by old filename-based ID
-      if (!game && gameId.includes('-')) {
-        game = data.games.find(g => {
-          // Match by timestamp pattern in ID
-          const tsMatch = gameId.match(/(\d{2}-\d{2}-\d{4}-\d{2}-\d{2}-\d{2})/);
-          if (tsMatch && g.timestamp) {
-            const gameTs = new Date(g.timestamp).toISOString();
-            return gameTs.includes(tsMatch[1].replace(/-/g, ''));
-          }
-          return false;
-        });
+      if (!resp.ok) {
+        if (resp.status === 404) {
+          console.warn(`Game not found in archive: ${gameId}`);
+          loadingEl.style.display = 'none';
+          notFoundEl.style.display = 'block';
+          return;
+        }
+        throw new Error(`HTTP ${resp.status}`);
       }
       
-      if (!game) {
+      loadingMessage.textContent = 'Loading game data...';
+      const data = await resp.json();
+      
+      if (!data.game) {
         console.warn(`Game not found in archive: ${gameId}`);
         loadingEl.style.display = 'none';
         notFoundEl.style.display = 'block';
@@ -102,12 +93,15 @@
       }
 
       isArchiveGame = true;
-      currentGame = game;
-      console.log('Loaded archive game:', game.id || gameId);
-      render(game);
+      currentGame = data.game;
+      console.log('Loaded archive game:', currentGame.id || gameId);
+      render(currentGame);
     } catch (e) {
       console.error('Failed to load archive game:', e);
       loadingEl.style.display = 'none';
+      notFoundEl.style.display = 'block';
+    }
+  }
       notFoundEl.style.display = 'block';
     }
   }

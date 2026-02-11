@@ -42,9 +42,57 @@ class CORSRequestHandler(http.server.SimpleHTTPRequestHandler):
         # API endpoint for game metadata (counts)
         elif parsed_path.path == '/api/games/meta':
             self.handle_games_meta()
+        # API endpoint for single game by ID
+        elif parsed_path.path.startswith('/api/games/'):
+            game_id = parsed_path.path.split('/api/games/')[1]
+            self.handle_single_game(game_id)
         else:
             # Regular file serving
             super().do_GET()
+    
+    def handle_single_game(self, game_id):
+        """Return a single game by ID"""
+        try:
+            with open(GAMES_FILE, 'r') as f:
+                data = json.load(f)
+            
+            games = data.get('games', [])
+            
+            # Try to find game by ID
+            game = None
+            for g in games:
+                if g.get('id') == game_id:
+                    game = g
+                    break
+            
+            # If not found by ID, try matching by old filename-based ID
+            if not game and '-' in game_id:
+                import re
+                ts_match = re.search(r'(\d{2}-\d{2}-\d{4}-\d{2}-\d{2}-\d{2})', game_id)
+                if ts_match:
+                    for g in games:
+                        if g.get('timestamp'):
+                            game_ts = g['timestamp'].replace(':', '').replace('T', '-').replace('Z', '')
+                            if ts_match.group(1).replace('-', '') in game_ts.replace('-', ''):
+                                game = g
+                                break
+            
+            if not game:
+                self.send_error(404, f"Game not found: {game_id}")
+                return
+            
+            response = {
+                'game': game,
+                'players': data.get('players', [])
+            }
+            
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(response).encode())
+            
+        except Exception as e:
+            self.send_error(500, f"Error loading game: {str(e)}")
     
     def handle_games_meta(self):
         """Return metadata: total games count, total players, etc."""
