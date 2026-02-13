@@ -12,14 +12,17 @@
   // ── Configuration ──
   const POLL_URL = '/data/live-games.json';
   const POLL_INTERVAL = 5000; // 5 seconds, same as PyTracker
-  const MAX_RECENT_GAMES = 10;
+  const RECENT_GAMES_HOURS = 24; // Show games from past 24 hours
+  const RECENT_GAMES_API_LIMIT = 100; // Load this many games to filter from
 
   // ── State ──
   let activeGames = new Map();  // id → game
   let recentGames = [];
+  let persistedRecentGames = []; // Loaded from API
   let lastUpdated = null;
   let pollTimer = null;
   let knownGameIds = new Set(); // track games we've seen, to detect removals
+  let recentGamesLoaded = false; // Track if we've loaded from API
 
   // ── DOM Elements ──
   const statusEl      = document.getElementById('connectionStatus');
@@ -77,11 +80,10 @@
           const removed = activeGames.get(oldId);
           if (removed) {
             activeGames.delete(oldId);
-            // Only add to recent if it's not already there
+            // Add to session recent games (will be combined with persisted in render)
             const alreadyRecent = recentGames.some(g => g.id === removed.id);
             if (!alreadyRecent) {
               recentGames.unshift(removed);
-              if (recentGames.length > MAX_RECENT_GAMES) recentGames.length = MAX_RECENT_GAMES;
             }
           }
         }
@@ -97,7 +99,6 @@
           }
         }
         activeGames.clear();
-        if (recentGames.length > MAX_RECENT_GAMES) recentGames.length = MAX_RECENT_GAMES;
       }
 
       knownGameIds = incomingIds;
@@ -277,22 +278,43 @@
 
   // ── Render Recent Games ──
   function renderRecentGames() {
-    recentCountEl.textContent = `${recentGames.length} ${recentGames.length === 1 ? 'game' : 'games'}`;
+    // Combine in-session recent games with persisted ones, remove duplicates
+    const cutoff = Date.now() - (RECENT_GAMES_HOURS * 60 * 60 * 1000);
+    const allRecent = [...recentGames, ...persistedRecentGames];
+    
+    // Deduplicate by ID and filter by time
+    const seen = new Set();
+    const filtered = allRecent.filter(g => {
+      if (seen.has(g.id)) return false;
+      seen.add(g.id);
+      const gameTime = new Date(g.timestamp || g.startTime).getTime();
+      return gameTime >= cutoff;
+    });
+    
+    // Sort by timestamp, newest first
+    filtered.sort((a, b) => {
+      const aTime = new Date(a.timestamp || a.startTime).getTime();
+      const bTime = new Date(b.timestamp || b.startTime).getTime();
+      return bTime - aTime;
+    });
 
-    if (recentGames.length === 0) {
-      recentListEl.innerHTML = '<p style="text-align:center;color:var(--text-dim);padding:2rem">No recent games yet.</p>';
+    recentCountEl.textContent = `${filtered.length} ${filtered.length === 1 ? 'game' : 'games'}`;
+
+    if (filtered.length === 0) {
+      recentListEl.innerHTML = '<p style="text-align:center;color:var(--text-dim);padding:2rem">No games in the past 24 hours.</p>';
       return;
     }
 
-    recentListEl.innerHTML = recentGames.map(g => {
+    recentListEl.innerHTML = filtered.map(g => {
       const players = g.players || [];
       const names = players.map(p => p.name).join(', ');
       const trunc = names.length > 40 ? names.slice(0, 40) + '…' : names;
+      const timestamp = g.timestamp || g.startTime;
       return `
         <div class="recent-game-card" data-game-id="${esc(g.id)}" onclick="window.location.href='game.html?id=${encodeURIComponent(g.id)}'">
-          <div class="recent-game-time">${timeAgo(g.timestamp)}</div>
+          <div class="recent-game-time">${timeAgo(timestamp)}</div>
           <div class="recent-game-info">
-            <div class="recent-game-map">${esc(g.mission || 'Unknown Map')}</div>
+            <div class="recent-game-map">${esc(g.mission || g.map || 'Unknown Map')}</div>
             <div class="recent-game-players">${esc(trunc)}</div>
           </div>
           <div class="recent-game-stats">
@@ -302,15 +324,33 @@
     }).join('');
   }
 
+  // ── Load Recent Games from API ──
+  async function loadRecentGames() {
+    try {
+      const resp = await fetch(`/api/games?limit=${RECENT_GAMES_API_LIMIT}`);
+      if (!resp.ok) return;
+      
+      const data = await resp.json();
+      persistedRecentGames = data.games || [];
+      recentGamesLoaded = true;
+      renderRecentGames();
+    } catch (e) {
+      console.warn('Failed to load recent games:', e);
+    }
+  }
+
   // ── Start ──
   function init() {
     console.log('DXX Live Tracker v3.0 (HTTP polling)');
+    loadRecentGames(); // Load recent games from API
     poll(); // First poll immediately
     pollTimer = setInterval(poll, POLL_INTERVAL);
 
     // Update "time ago" labels periodically
     setInterval(() => {
-      if (recentGames.length > 0) renderRecentGames();
+      if (recentGames.length > 0 || persistedRecentGames.length > 0) {
+        renderRecentGames();
+      }
     }, 30000);
   }
 
