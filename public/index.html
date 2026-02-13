@@ -55,10 +55,13 @@
       <details class="setup-info">
         <summary>How to enable game tracking</summary>
         <ol>
-          <li>Launch DXX-Redux with gamelog flags: <code>-gamelog_split -gamelog_timestamp</code></li>
-          <li>Start the watcher: <code>WS_PORT=8081 node scraper/gamelog-watcher.js</code></li>
-          <li>Play Descent — your games will appear here in real-time!</li>
+          <li>Launch DXX-Rebirth/Redux with tracker flags: <code>-tracker_hostaddr tracker.dxxtracker.com -tracker_hostport 9999</code></li>
+          <li>Alternatively, use the direct IP: <code>-tracker_hostaddr 192.210.140.94 -tracker_hostport 9999</code></li>
+          <li>Start or join any multiplayer game — it will appear here within seconds!</li>
         </ol>
+        <p style="margin-top: 0.5rem; font-size: 0.9rem; color: var(--text-dim);">
+          <strong>Note:</strong> Add the tracker flags to your Steam launch options or command line when starting DXX-Rebirth/Redux.
+        </p>
       </details>
     </div>
   </section>
