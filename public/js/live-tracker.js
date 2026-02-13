@@ -10,7 +10,7 @@
   'use strict';
 
   // ── Configuration ──
-  const POLL_URL = 'https://turns-extension-neighbor-front.trycloudflare.com/data/live-games.json';
+  const POLL_URL = '/data/live-games.json';
   const POLL_INTERVAL = 5000; // 5 seconds, same as PyTracker
   const MAX_RECENT_GAMES = 10;
 
@@ -67,23 +67,6 @@
         for (const g of data.games) {
           if (!g.id) continue;
           incomingIds.add(g.id);
-
-          // Merge gamelog stats into player data
-          if (data.gamelog && data.gamelog.players) {
-            for (const p of (g.players || [])) {
-              const lp = data.gamelog.players.find(
-                x => x.name.toLowerCase() === (p.name || '').toLowerCase()
-              );
-              if (lp) {
-                p.kills    = Math.max(p.kills    || 0, lp.kills    || 0);
-                p.deaths   = Math.max(p.deaths   || 0, lp.deaths   || 0);
-                p.suicides = Math.max(p.suicides || 0, lp.suicides || 0);
-              }
-            }
-            g.totalKills = data.gamelog.totalKills || 0;
-            g.killFeed   = data.gamelog.killFeed   || [];
-          }
-
           activeGames.set(g.id, g);
         }
       }

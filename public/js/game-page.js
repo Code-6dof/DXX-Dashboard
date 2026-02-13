@@ -67,26 +67,44 @@
       console.log('Loading from archive...');
       loadingTitle.textContent = 'Loading from archive...';
       loadingMessage.textContent = 'Searching for game...';
-      loadingProgress.textContent = 'Fetching game from archive';
+      loadingProgress.textContent = 'Fetching game';
       
-      // Use new API endpoint for single game lookup
-      const resp = await fetch(`/api/games/${encodeURIComponent(gameId)}?t=${Date.now()}`);
-      
-      if (!resp.ok) {
-        if (resp.status === 404) {
-          console.warn(`Game not found in archive: ${gameId}`);
-          loadingEl.style.display = 'none';
-          notFoundEl.style.display = 'block';
-          return;
+      // Try Firebase first (newer games), then fall back to games.json archive
+      let data = null;
+      let fromFirebase = false;
+
+      try {
+        const fbResp = await fetch(`/api/firebase/game/${encodeURIComponent(gameId)}?t=${Date.now()}`);
+        if (fbResp.ok) {
+          data = await fbResp.json();
+          if (data.game) {
+            fromFirebase = true;
+            console.log('Found game in Firebase');
+          }
         }
-        throw new Error(`HTTP ${resp.status}`);
+      } catch (fbErr) {
+        console.log('Firebase lookup failed, trying archive:', fbErr.message);
+      }
+
+      // Fall back to games.json archive
+      if (!data || !data.game) {
+        const resp = await fetch(`/api/games/${encodeURIComponent(gameId)}?t=${Date.now()}`);
+        
+        if (!resp.ok) {
+          if (resp.status === 404) {
+            console.warn(`Game not found: ${gameId}`);
+            loadingEl.style.display = 'none';
+            notFoundEl.style.display = 'block';
+            return;
+          }
+          throw new Error(`HTTP ${resp.status}`);
+        }
+        
+        data = await resp.json();
       }
       
-      loadingMessage.textContent = 'Loading game data...';
-      const data = await resp.json();
-      
       if (!data.game) {
-        console.warn(`Game not found in archive: ${gameId}`);
+        console.warn(`Game not found: ${gameId}`);
         loadingEl.style.display = 'none';
         notFoundEl.style.display = 'block';
         return;
@@ -94,12 +112,63 @@
 
       isArchiveGame = true;
       currentGame = data.game;
-      console.log('Loaded archive game:', currentGame.id || gameId);
+      
+      // Firebase games have events embedded; archive games need event file fetch
+      if (fromFirebase && data.game.events) {
+        const ev = data.game.events;
+        currentGame.killFeed = ev.killFeed || [];
+        currentGame.chatLog = ev.chatLog || [];
+        currentGame.timeline = ev.timeline || [];
+        currentGame.killMatrix = ev.killMatrix || {};
+        currentGame.damageBreakdown = ev.damageBreakdown || [];
+        if (ev.players && ev.players.length > 0) {
+          currentGame.players = ev.players;
+        }
+        delete currentGame.events; // Clean up nested events
+      } else {
+        // Try to fetch event data from event files
+        loadingMessage.textContent = 'Loading event data...';
+        try {
+          const eventResp = await fetch(`data/events/${encodeURIComponent(gameId)}.json?t=${Date.now()}`);
+          if (eventResp.ok) {
+            const eventData = await eventResp.json();
+            console.log('Loaded event data for archive game');
+            
+            currentGame.killFeed = eventData.killFeed || [];
+            currentGame.chatLog = eventData.chatLog || [];
+            currentGame.timeline = eventData.timeline || [];
+            currentGame.killMatrix = eventData.killMatrix || {};
+            currentGame.damageBreakdown = eventData.damageBreakdown || [];
+            
+            if (eventData.players && eventData.players.length > 0) {
+              currentGame.players = eventData.players;
+            }
+          } else {
+            console.log('No event file found for this game');
+          }
+        } catch (eventErr) {
+          console.log('Could not load event data:', eventErr.message);
+        }
+      }
+      
+      console.log(`Loaded ${fromFirebase ? 'Firebase' : 'archive'} game:`, currentGame.id || gameId);
       render(currentGame);
     } catch (e) {
       console.error('Failed to load archive game:', e);
       loadingEl.style.display = 'none';
       notFoundEl.style.display = 'block';
+    }
+  }
+
+  // ── Fetch Events from Tracker API (proxied through main server) ──
+  async function fetchEvents(gameId) {
+    try {
+      const resp = await fetch(`/api/events/${encodeURIComponent(gameId)}?t=${Date.now()}`);
+      if (!resp.ok) return null;
+      return await resp.json();
+    } catch (e) {
+      console.warn('Failed to fetch events:', e.message);
+      return null;
     }
   }
 
@@ -141,24 +210,12 @@
       missedPolls = 0;
       isArchiveGame = false;
 
-      // Merge gamelog stats into player data
-      if (data.gamelog && data.gamelog.players) {
-        for (const p of (game.players || [])) {
-          const lp = data.gamelog.players.find(
-            x => x.name.toLowerCase() === (p.name || '').toLowerCase()
-          );
-          if (lp) {
-            p.kills    = Math.max(p.kills    || 0, lp.kills    || 0);
-            p.deaths   = Math.max(p.deaths   || 0, lp.deaths   || 0);
-            p.suicides = Math.max(p.suicides || 0, lp.suicides || 0);
-          }
-        }
-        game.totalKills = data.gamelog.totalKills || 0;
-        game.killFeed   = data.gamelog.killFeed   || [];
-        game.timeline   = data.gamelog.timeline || [];
-        game.chatLog    = data.gamelog.chatLog || [];
-        game.killMatrix = data.gamelog.killMatrix || {};
-        game.damageBreakdown = data.gamelog.damageBreakdown || [];
+      // Fetch real-time events from tracker
+      const events = await fetchEvents(gameId);
+      if (events) {
+        game.killFeed = events.killFeed || [];
+        game.chatLog = events.chat || [];
+        game.timeline = events.timeline || [];
       }
 
       currentGame = game;
@@ -190,12 +247,88 @@
     // Scoreboard
     scoreboardEl.innerHTML = renderScoreboard(players, gameType);
 
+    // Build unique display names (handle duplicate player names)
+    const displayNames = [];
+    const nameCounts = {};
+    players.forEach(p => { nameCounts[p.name] = (nameCounts[p.name] || 0) + 1; });
+    const nameSeens = {};
+    players.forEach((p, i) => {
+      if (nameCounts[p.name] > 1) {
+        nameSeens[p.name] = (nameSeens[p.name] || 0) + 1;
+        displayNames[i] = `${p.name} (${nameSeens[p.name]})`;
+      } else {
+        displayNames[i] = p.name;
+      }
+    });
+
+    // Normalize killMatrix: convert array format [i][j] to object {displayName: {displayName: count}}
+    let killMatrix = game.killMatrix || null;
+    if (Array.isArray(killMatrix) && players.length > 0) {
+      const namedMatrix = {};
+      players.forEach((p, i) => {
+        const dn = displayNames[i];
+        namedMatrix[dn] = {};
+        players.forEach((p2, j) => {
+          namedMatrix[dn][displayNames[j]] = (killMatrix[i] && killMatrix[i][j]) || 0;
+        });
+      });
+      killMatrix = namedMatrix;
+    }
+
+    // If no kill feed but we have a kill matrix, generate a summary kill feed from it
+    let killFeed = game.killFeed || [];
+    if (killFeed.length === 0 && killMatrix && typeof killMatrix === 'object' && !Array.isArray(killMatrix)) {
+      const names = Object.keys(killMatrix);
+      names.forEach(killer => {
+        names.forEach(victim => {
+          const count = killMatrix[killer][victim] || 0;
+          if (count > 0 && killer !== victim) {
+            for (let i = 0; i < count; i++) {
+              killFeed.push({
+                killer: killer,
+                killed: victim,
+                victim: victim,
+                message: `${killer} killed ${victim}`,
+              });
+            }
+          }
+        });
+      });
+    }
+
+    // If no timeline but we have events, build one from kill feed + chat
+    let timeline = game.timeline || [];
+    if (timeline.length === 0) {
+      if (killFeed.length > 0) {
+        killFeed.forEach((k, idx) => {
+          const isSuicide = (k.killerNum !== undefined && k.killedNum !== undefined)
+            ? k.killerNum === k.killedNum
+            : (k.killer === k.killed || k.killer === k.victim);
+          timeline.push({
+            type: 'kill',
+            time: k.time || '',
+            description: k.message || (isSuicide ? `${k.killed || k.victim} died` : `${k.killer} killed ${k.killed || k.victim}`),
+          });
+        });
+      }
+      if ((game.chatLog || []).length > 0) {
+        game.chatLog.forEach(msg => {
+          timeline.push({
+            type: 'chat',
+            time: msg.time || '',
+            description: `${msg.from || msg.player || 'Unknown'}: ${msg.message}`,
+          });
+        });
+      }
+    }
+
     // Event data panels
-    const hasKillFeed = game.killFeed && game.killFeed.length > 0;
-    const hasMatrix = game.killMatrix && Object.keys(game.killMatrix).length > 0;
+    const hasKillFeed = killFeed.length > 0;
+    const hasMatrix = killMatrix && typeof killMatrix === 'object' && !Array.isArray(killMatrix) && Object.keys(killMatrix).length > 0;
+    const hasTimeline = timeline.length > 0;
     const hasDamage = game.damageBreakdown && game.damageBreakdown.length > 0;
     const hasChat = game.chatLog && game.chatLog.length > 0;
-    const hasAnyEvents = hasKillFeed || hasMatrix || hasDamage || hasChat;
+    const hasAnyEvents = hasKillFeed || hasMatrix || hasTimeline || hasDamage || hasChat;
 
     if (hasAnyEvents) {
       tabsEl.style.display = 'flex';
@@ -205,15 +338,28 @@
         const panel = tab.dataset.panel;
         if (panel === 'killFeed' && !hasKillFeed) tab.style.display = 'none';
         else if (panel === 'killMatrix' && !hasMatrix) tab.style.display = 'none';
-        else if (panel === 'timeline' && !hasKillFeed) tab.style.display = 'none';
+        else if (panel === 'timeline' && !hasTimeline) tab.style.display = 'none';
         else if (panel === 'damage' && !hasDamage) tab.style.display = 'none';
         else if (panel === 'chat' && !hasChat) tab.style.display = 'none';
         else tab.style.display = '';
       });
 
-      killFeedEl.innerHTML = renderKillFeed(game.killFeed || []);
-      killMatrixEl.innerHTML = renderKillMatrix(game.killMatrix || {}, players);
-      timelineEl.innerHTML = renderTimeline(game.killFeed || []);
+      // Auto-select first visible tab if current active tab is hidden
+      const activeTab = tabsEl.querySelector('.gdm-tab.active');
+      if (activeTab && activeTab.style.display === 'none') {
+        const firstVisible = tabsEl.querySelector('.gdm-tab:not([style*="display: none"])');
+        if (firstVisible) {
+          tabsEl.querySelectorAll('.gdm-tab').forEach(t => t.classList.remove('active'));
+          document.querySelectorAll('.gdm-panel').forEach(p => p.classList.remove('active'));
+          firstVisible.classList.add('active');
+          const panel = document.getElementById(`panel-${firstVisible.dataset.panel}`);
+          if (panel) panel.classList.add('active');
+        }
+      }
+
+      killFeedEl.innerHTML = renderKillFeed(killFeed);
+      killMatrixEl.innerHTML = renderKillMatrix(killMatrix || {}, players);
+      timelineEl.innerHTML = renderTimeline(timeline);
       damageEl.innerHTML = renderDamageBreakdown(game.damageBreakdown || [], players);
       chatEl.innerHTML = renderChatLog(game.chatLog || []);
     } else {
@@ -248,11 +394,17 @@
       ? '<span class="archive-badge" style="background:var(--text-muted);color:var(--bg);padding:0.3rem 0.6rem;border-radius:4px;font-size:0.8rem;font-weight:700">ARCHIVE</span>'
       : '<span class="live-badge">LIVE</span>';
 
+    // Format timestamp if available
+    const timestampHtml = game.timestamp 
+      ? `<span class="game-page-meta-item" style="color:var(--text-dim);font-size:0.9rem">${formatDateTime(game.timestamp)}</span>`
+      : '';
+
     headerEl.innerHTML = `
       <div class="game-page-title-row">
         <div>
           <h1>${esc(game.gameName || game.mission || 'Unknown Map')}</h1>
           <div class="game-page-meta">
+            ${timestampHtml}
             <span class="mode-badge ${modeClass}">${modeLabel}</span>
             <span class="game-page-meta-item">${esc(game.mission || '')}</span>
             <span class="game-page-meta-item">${game.playerCount || (game.players || []).length}/${game.maxPlayers || 8} players</span>
@@ -335,16 +487,38 @@
     }
 
     const items = killFeed.map((k, idx) => {
-      const timeStr = k.time
-        ? `<span class="kf-time">${esc(typeof k.time === 'string' ? k.time : '')}</span>`
-        : `<span class="kf-time">#${idx + 1}</span>`;
-      const isSuicide = k.killer === k.victim || !k.killer;
+      // Handle both old format (k.time as string) and new format (k.time as game seconds)
+      let timeStr;
+      if (k.time) {
+        timeStr = `<span class="kf-time">${esc(k.time)}s</span>`;
+      } else {
+        timeStr = `<span class="kf-time">#${idx + 1}</span>`;
+      }
+
+      // Handle both old format (k.victim/k.killer) and new format (k.killed/k.killer)
+      const victim = k.killed || k.victim || 'Unknown';
+      const killer = k.killer || 'Unknown';
+      // Use player numbers for suicide detection when available (handles same-name players)
+      const isSuicide = (k.killerNum !== undefined && k.killedNum !== undefined)
+        ? k.killerNum === k.killedNum
+        : (killer === victim || !killer || killer === 'Unknown');
       const killClass = isSuicide ? 'kf-suicide' : 'kf-kill';
+      
+      // Build message
+      let message;
+      if (k.message) {
+        message = k.message;
+      } else if (isSuicide) {
+        message = `${victim} died`;
+      } else {
+        message = `${killer} → ${victim}`;
+      }
+      
       return `
         <div class="kf-entry ${killClass}">
           ${timeStr}
-          <span class="kf-msg">${esc(k.message || `${k.killer || ''} killed ${k.victim || ''}`)}</span>
-          ${k.method ? `<span class="kf-method">${esc(k.method)}</span>` : ''}
+          <span class="kf-msg">${esc(message)}</span>
+          ${k.method || k.weapon ? `<span class="kf-method">${esc(k.method || k.weapon)}</span>` : ''}
         </div>`;
     }).join('');
 
@@ -362,7 +536,8 @@
       return '<p class="gdm-empty">No kill matrix data.</p>';
     }
 
-    const names = players.map(p => p.name);
+    // Use killMatrix keys (already unique display names) instead of raw player names
+    const names = Object.keys(killMatrix);
     let headerCells = '<th class="km-corner">Killer / Victim</th>';
     names.forEach(n => {
       headerCells += `<th class="km-name">${esc(n.length > 12 ? n.slice(0, 10) + '...' : n)}</th>`;
@@ -392,41 +567,105 @@
           <thead><tr>${headerCells}</tr></thead>
           <tbody>${rows}</tbody>
         </table>
-      </div>
-      <p class="gdm-matrix-hint">
-        <strong>How to read:</strong> Each row shows kills BY that player, each column shows deaths OF that player.<br>
-        Example: Row "Alice" + Column "Bob" = times Alice killed Bob. 
-        <span style="color:var(--green)">● Green</span> = kills, 
-        <span style="color:var(--red)">— Dash</span> = self (diagonal), 
-        <span style="color:var(--text-dim)">· Dot</span> = no kills.
-      </p>`;
+      </div>`;
   }
 
-  // ── Render: Timeline (derived from kill feed sequence) ──
-  function renderTimeline(killFeed) {
-    if (!killFeed || killFeed.length === 0) {
+  // ── Render: Timeline (shows all events: kills, chat, deaths, etc) ──
+  function renderTimeline(timeline) {
+    if (!timeline || timeline.length === 0) {
       return '<p class="gdm-empty">No timeline events.</p>';
     }
 
-    const items = killFeed.map((k, idx) => {
-      const timeStr = k.time || `#${idx + 1}`;
-      const isSuicide = k.killer === k.victim || !k.killer;
-      const typeClass = isSuicide ? 'tl-kill tl-suicide' : 'tl-kill';
-      const desc = k.message || (isSuicide
-        ? `${k.victim || 'Unknown'} died`
-        : `${k.killer || '?'} killed ${k.victim || '?'}`);
+    const items = timeline.map((evt, idx) => {
+      const timeStr = evt.time ? `${evt.time}s` : `#${idx + 1}`;
+      
+      let typeClass, icon, desc;
+      
+      // If event has pre-built description (from event files), use it
+      if (evt.description) {
+        desc = esc(evt.description);
+        // Determine icon and class based on type
+        switch (evt.type) {
+          case 'kill':
+            typeClass = 'tl-kill';
+            icon = '💀';
+            break;
+          case 'join':
+            typeClass = 'tl-join';
+            icon = '👤';
+            break;
+          case 'chat':
+            typeClass = 'tl-chat';
+            icon = '💬';
+            break;
+          case 'reactor':
+            typeClass = 'tl-reactor';
+            icon = '💥';
+            break;
+          case 'escape':
+            typeClass = 'tl-escape';
+            icon = '✈️';
+            break;
+          case 'death':
+            typeClass = 'tl-death';
+            icon = '☠️';
+            break;
+          case 'quit':
+            typeClass = 'tl-quit';
+            icon = '🚪';
+            break;
+          default:
+            typeClass = 'tl-other';
+            icon = '•';
+        }
+      } else {
+        // Build description from individual fields (live tracker format)
+        switch (evt.type) {
+          case 'kill':
+            const isSuicide = (evt.killerNum !== undefined && evt.killedNum !== undefined)
+              ? evt.killerNum === evt.killedNum
+              : (evt.killer === evt.killed || !evt.killer);
+            typeClass = isSuicide ? 'tl-kill tl-suicide' : 'tl-kill';
+            icon = '💀';
+            desc = isSuicide 
+              ? `${esc(evt.killed || 'Unknown')} died`
+              : `${esc(evt.killer || '?')} killed ${esc(evt.killed || '?')}`;
+            if (evt.weapon) desc += ` (${esc(evt.weapon)})`;
+            break;
+          case 'chat':
+            typeClass = 'tl-chat';
+            icon = '💬';
+            desc = `${esc(evt.from)}: ${esc(evt.message)}`;
+            break;
+          case 'death':
+            typeClass = 'tl-death';
+            icon = '💥';
+            desc = `${esc(evt.player)} exploded`;
+            break;
+          case 'quit':
+            typeClass = 'tl-quit';
+            icon = '🚪';
+            desc = `${esc(evt.player)} left the game`;
+            break;
+          default:
+            typeClass = 'tl-other';
+            icon = '•';
+            desc = JSON.stringify(evt);
+        }
+      }
 
       return `
         <div class="tl-entry ${typeClass}">
           <span class="tl-time">${esc(timeStr)}</span>
-          <span class="tl-desc">${esc(desc)}${k.method ? ` [${esc(k.method)}]` : ''}</span>
+          <span class="tl-icon">${icon}</span>
+          <span class="tl-desc">${desc}</span>
         </div>`;
     }).join('');
 
     return `
       <div class="gdm-timeline-header">
         <span>Timeline</span>
-        <span class="tl-count">${killFeed.length} events</span>
+        <span class="tl-count">${timeline.length} events</span>
       </div>
       <div class="gdm-timeline">${items}</div>`;
   }
@@ -466,13 +705,21 @@
       return '<p class="gdm-empty">No chat messages.</p>';
     }
 
-    const items = chatLog.map(msg => `
-      <div class="chat-entry">
-        ${msg.time ? `<span class="chat-time">${esc(typeof msg.time === 'string' ? msg.time : '')}</span>` : ''}
-        <span class="chat-player">${esc(msg.player)}:</span>
-        <span class="chat-msg">${esc(msg.message)}</span>
-      </div>
-    `).join('');
+    const items = chatLog.map(msg => {
+      // Handle both old format and new format
+      const player = msg.from || msg.player || 'Unknown';
+      const time = msg.time ? `${msg.time}s` : '';
+      const isObserver = msg.isObserver || false;
+      const observerClass = isObserver ? 'chat-observer' : '';
+      
+      return `
+        <div class="chat-entry ${observerClass}">
+          ${time ? `<span class="chat-time">${esc(time)}</span>` : ''}
+          <span class="chat-player">${esc(player)}:</span>
+          <span class="chat-msg">${esc(msg.message)}</span>
+        </div>
+      `;
+    }).join('');
 
     return `
       <div class="gdm-chat-header">

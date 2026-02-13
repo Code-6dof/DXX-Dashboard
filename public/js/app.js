@@ -44,6 +44,10 @@
     });
   }
 
+  // ── State: Firebase games ──
+  let firebaseGames = []; // Games from Firestore (post Feb 10 2026)
+  let firebaseLoaded = false;
+
   // ── Load Metadata (counts only) ───────────────────────────────
   async function loadMetadata() {
     const progressText = document.getElementById('loadingProgress');
@@ -53,16 +57,46 @@
       loadingTextEl.textContent = 'Loading game statistics...';
       progressText.textContent = 'Fetching metadata';
       
-      const response = await fetch(`${API_BASE}/api/games/meta`);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      
-      gameMeta = await response.json();
+      // Fetch both archive meta and Firebase count in parallel
+      const [metaResp, fbResp] = await Promise.all([
+        fetch(`${API_BASE}/api/games/meta`),
+        fetch(`${API_BASE}/api/firebase/count`).catch(() => null),
+      ]);
+
+      if (!metaResp.ok) throw new Error(`HTTP ${metaResp.status}`);
+      gameMeta = await metaResp.json();
+
+      // Add Firebase count to total
+      let fbCount = 0;
+      if (fbResp && fbResp.ok) {
+        const fbData = await fbResp.json();
+        fbCount = fbData.count || 0;
+      }
+      gameMeta.firebaseGames = fbCount;
+      gameMeta.totalGames += fbCount;
+
       progressText.textContent = `Found ${gameMeta.totalGames.toLocaleString()} games in archive`;
       console.log('Metadata loaded:', gameMeta);
       return gameMeta;
     } catch (err) {
       console.error('Error loading metadata:', err);
       throw err;
+    }
+  }
+
+  // ── Load Firebase Games (all recent games) ─────────────────────
+  async function loadFirebaseGames() {
+    try {
+      const resp = await fetch(`${API_BASE}/api/firebase/games?limit=200`);
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      firebaseGames = data.games || [];
+      firebaseLoaded = true;
+      console.log(`Firebase: loaded ${firebaseGames.length} recent games`);
+      return firebaseGames;
+    } catch (err) {
+      console.warn('Firebase games fetch failed:', err.message);
+      return [];
     }
   }
 
@@ -75,15 +109,27 @@
       loadingTextEl.textContent = `Loading page ${page}...`;
       progressText.textContent = `Fetching ${limit} games`;
       
+      // On first page, also fetch Firebase games (they're all newer)
+      if (page === 1 && !firebaseLoaded) {
+        await loadFirebaseGames();
+      }
+
       const response = await fetch(`${API_BASE}/api/games?page=${page}&limit=${limit}`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       
       const data = await response.json();
-      games = data.games;
+
+      // First page: prepend Firebase games (newest) before archive games
+      if (page === 1 && firebaseGames.length > 0) {
+        games = [...firebaseGames, ...data.games];
+      } else {
+        games = data.games;
+      }
       players = data.players;
       
-      progressText.textContent = `Loaded ${games.length} games (page ${page} of ${data.pagination.totalPages})`;
-      console.log(`Loaded page ${page}: ${games.length} games`);
+      const totalArchivePages = data.pagination ? data.pagination.totalPages : 1;
+      progressText.textContent = `Loaded ${games.length} games (page ${page})`;
+      console.log(`Loaded page ${page}: ${games.length} games (${firebaseGames.length} firebase + ${data.games.length} archive)`);
       return data;
     } catch (err) {
       console.error('Error loading games:', err);
@@ -95,17 +141,25 @@
   async function loadMoreGames() {
     if (isLoading || !gameMeta) return false;
     
-    const totalPages = Math.ceil(gameMeta.totalGames / PAGE_SIZE);
-    const nextPage = Math.floor(games.length / PAGE_SIZE) + 1;
+    // Archive pages only — Firebase games are all loaded on page 1
+    const archiveGamesLoaded = games.length - firebaseGames.length;
+    const archiveTotal = gameMeta.totalGames - (gameMeta.firebaseGames || 0);
+    const nextPage = Math.floor(archiveGamesLoaded / PAGE_SIZE) + 1;
+    const totalPages = Math.ceil(archiveTotal / PAGE_SIZE);
     
     if (nextPage > totalPages) return false;
     
     isLoading = true;
     try {
-      const data = await loadGames(nextPage, PAGE_SIZE);
+      const response = await fetch(`${API_BASE}/api/games?page=${nextPage}&limit=${PAGE_SIZE}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      
+      // Only append archive games (Firebase already prepended)
       games = games.concat(data.games);
-      DXXFilters.setData(games, players);
-      console.log(`Loaded page ${nextPage}: now have ${games.length} games`);
+      players = data.players;
+      DXXFilters.setData(games, players, gameMeta);
+      console.log(`Loaded archive page ${nextPage}: now have ${games.length} games total`);
       return true;
     } catch (err) {
       console.error('Error loading more games:', err);
@@ -162,9 +216,34 @@
       ? `${filtered.length.toLocaleString()} / ${gameMeta.totalGames.toLocaleString()}`
       : filtered.length.toLocaleString();
     totalGamesEl.textContent = displayText;
+    
+    // Check if filters are active
+    const searchEl = document.getElementById("searchInput");
+    const yearEl = document.getElementById("yearFilter");
+    const monthEl = document.getElementById("monthFilter");
+    const mapEl = document.getElementById("mapFilter");
+    const versionEl = document.getElementById("versionFilter");
+    
+    const hasActiveFilters = 
+      (searchEl && searchEl.value) ||
+      (yearEl && yearEl.value) ||
+      (monthEl && monthEl.value) ||
+      (mapEl && mapEl.value) ||
+      (versionEl && versionEl.value);
+    
+    const notAllLoaded = gameMeta && games.length < gameMeta.totalGames;
+    
     totalGamesEl.title = gameMeta 
-      ? `Showing ${filtered.length} of ${gameMeta.totalGames} total games`
+      ? `Showing ${filtered.length} of ${gameMeta.totalGames} total games${notAllLoaded ? ` (${games.length.toLocaleString()} loaded)` : ''}`
       : `${filtered.length} games`;
+    
+    // Add warning indicator if filtering with incomplete data
+    if (hasActiveFilters && notAllLoaded) {
+      totalGamesEl.style.color = 'var(--orange, #ff9800)';
+      totalGamesEl.title += '\n⚠️ Filters apply to loaded games only. Click "Apply" to load more.';
+    } else {
+      totalGamesEl.style.color = '';
+    }
 
     const uniquePlayers = new Set();
     let totalKills = 0;
@@ -581,6 +660,32 @@
     renderDebounceTimer = setTimeout(refresh, delay);
   }
 
+  // ── Load More Games Until Filter Results ──────────────────────
+  async function loadUntilFilteredResults(minResults = 100, maxPages = 30) {
+    if (!gameMeta) return;
+    
+    let pagesLoaded = 0;
+    let filtered = DXXFilters.getFiltered();
+    
+    // Keep loading until we have enough filtered results or hit limits
+    while (filtered.length < minResults && 
+           games.length < gameMeta.totalGames && 
+           pagesLoaded < maxPages) {
+      const loaded = await loadMoreGames();
+      if (!loaded) break;
+      pagesLoaded++;
+      filtered = DXXFilters.getFiltered();
+      
+      // Update progress indicator
+      const applyBtn = document.getElementById("applyFilters");
+      if (applyBtn && pagesLoaded > 0) {
+        applyBtn.textContent = `Loading... (${filtered.length} found, ${games.length.toLocaleString()} scanned)`;
+      }
+    }
+    
+    return filtered;
+  }
+
   // ── Event Listeners ────────────────────────────────────────────
   document.getElementById("modeTabs").addEventListener("click", (e) => {
     if (e.target.classList.contains("tab")) {
@@ -588,11 +693,36 @@
     }
   });
 
-  document.getElementById("applyFilters").addEventListener("click", () => {
+  document.getElementById("applyFilters").addEventListener("click", async () => {
     currentPage = 1;
     duelPage = 1;
     ffaPage = 1;
+    
+    // If all games are loaded, just refresh (instant filtering)
+    if (allGamesLoaded) {
+      refresh();
+      return;
+    }
+    
+    // Otherwise, use the old smart loading logic
+    const applyBtn = document.getElementById("applyFilters");
+    const originalText = applyBtn.textContent;
+    applyBtn.textContent = "Loading...";
+    applyBtn.disabled = true;
+    
+    const filtered = DXXFilters.getFiltered();
+    console.log(`Apply Filters: ${filtered.length} matches in ${games.length} loaded games`);
+    
+    if (gameMeta && filtered.length < 100 && games.length < gameMeta.totalGames) {
+      console.log(`Loading more games (target: 200 matches, max: 30 pages)...`);
+      await loadUntilFilteredResults(200, 30);
+      console.log(`Loading complete: ${DXXFilters.getFiltered().length} matches in ${games.length} games`);
+    }
+    
     refresh();
+    
+    applyBtn.textContent = originalText;
+    applyBtn.disabled = false;
   });
 
   document.getElementById("clearFilters").addEventListener("click", () => {
@@ -601,24 +731,47 @@
     duelPage = 1;
     ffaPage = 1;
     refresh();
+    // Scroll to top to show cleared results
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   });
 
   document.getElementById("searchInput").addEventListener("input", () => {
-    currentPage = 1;
-    duelPage = 1;
-    ffaPage = 1;
-    debouncedRefresh(500);
+    // Only auto-refresh if all games are loaded (for instant filtering)
+    if (allGamesLoaded) {
+      currentPage = 1;
+      duelPage = 1;
+      ffaPage = 1;
+      debouncedRefresh(300);
+    }
   });
 
-  // Load more button
+  // Auto-apply filters when dropdowns change (only if all games loaded)
+  const filterDropdowns = ['yearFilter', 'monthFilter', 'mapFilter', 'versionFilter'];
+  filterDropdowns.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('change', () => {
+        // Only auto-apply if all games are loaded (for instant filtering)
+        if (allGamesLoaded) {
+          currentPage = 1;
+          duelPage = 1;
+          ffaPage = 1;
+          refresh();
+        }
+      });
+    }
+  });
+
+  // Load more button (only shown if games are partially loaded)
   const loadMoreBtn = document.createElement('button');
   loadMoreBtn.id = 'loadMoreBtn';
+  loadMoreBtn.style.display = 'none'; // Hidden by default with new Load All approach
   const updateLoadMoreText = () => {
     const total = gameMeta ? gameMeta.totalGames : '?';
     loadMoreBtn.textContent = `Load More Games (${games.length.toLocaleString()}/${typeof total === 'number' ? total.toLocaleString() : total} loaded)`;
   };
   updateLoadMoreText();
-  loadMoreBtn.style.cssText = 'margin: 2rem auto; display: block; padding: 1rem 2rem; background: var(--accent); color: white; border: none; cursor: pointer; font-size: 1rem; border-radius: 4px;';
+  loadMoreBtn.style.cssText = 'margin: 2rem auto; display: none; padding: 1rem 2rem; background: var(--accent); color: white; border: none; cursor: pointer; font-size: 1rem; border-radius: 4px;';
   loadMoreBtn.addEventListener('click', async () => {
     const loaded = await loadMoreGames();
     if (loaded) {
@@ -632,11 +785,39 @@
     }
   });
   
-  // Insert button after stats bar
+  // Insert button after stats bar (but it's hidden by default)
   const statsBar = document.querySelector('.stats-bar');
-  if (statsBar && gameMeta && games.length < gameMeta.totalGames) {
+  if (statsBar) {
     statsBar.parentNode.insertBefore(loadMoreBtn, statsBar.nextSibling);
   }
+
+  // Auto-load more games when scrolling near bottom (disabled with Load All approach)
+  let autoLoadInProgress = false;
+  window.addEventListener('scroll', async () => {
+    if (allGamesLoaded) return; // Skip if all games already loaded
+    if (autoLoadInProgress || !loadMoreBtn || loadMoreBtn.disabled) return;
+    if (!gameMeta || games.length >= gameMeta.totalGames) return;
+    
+    const scrollHeight = document.documentElement.scrollHeight;
+    const scrollTop = document.documentElement.scrollTop || document.body.scrollTop;
+    const clientHeight = document.documentElement.clientHeight;
+    
+    // Trigger when 80% scrolled
+    if ((scrollTop + clientHeight) / scrollHeight > 0.8) {
+      autoLoadInProgress = true;
+      const loaded = await loadMoreGames();
+      if (loaded) {
+        updateLoadMoreText();
+        refresh();
+      }
+      if (!loaded || (gameMeta && games.length >= gameMeta.totalGames)) {
+        loadMoreBtn.textContent = 'All games loaded';
+        loadMoreBtn.disabled = true;
+        loadMoreBtn.style.opacity = '0.5';
+      }
+      setTimeout(() => autoLoadInProgress = false, 1000);
+    }
+  });
 
   // Chart toggle functionality
   const toggleChartsBtn = document.getElementById("toggleCharts");
@@ -649,30 +830,29 @@
     });
   }
 
-  // ── Initialize ─────────────────────────────────────────────────
+  // ── Initialize ────────────────────────────────────────────
   const overlay = document.getElementById("loadingOverlay");
+  let allGamesLoaded = false;
 
   try {
     // Load metadata first (just counts, fast)
     await loadMetadata();
     
-    // Then load first page of games
+    // Load first page of games
     await loadGames(1, PAGE_SIZE);
-    ensureGameIds(); // Generate IDs for all games
-    DXXFilters.setData(games, players);
+    ensureGameIds();
+    DXXFilters.setData(games, players, gameMeta);
     
-    // Display dataset info
-    if (games.length > 0) {
-      const oldest = games[games.length - 1];
-      const newest = games[0];
-      const startDate = formatDate(oldest.timestamp);
-      const endDate = formatDate(newest.timestamp);
-      console.log(`DXX Dashboard: Showing ${games.length} of ${gameMeta.totalGames} games (${startDate} to ${endDate})`);
+    // Set placeholder text for hidden filter buttons
+    const placeholderText = document.getElementById('filterPlaceholderText');
+    if (placeholderText) {
+      placeholderText.textContent = 'Load all games below to enable filtering';
     }
     
+    // Render the initial page
     switchView("all");
-
-    console.log(`DXX Dashboard loaded: ${games.length} games shown, ${gameMeta.totalGames} total, ${players.length} players.`);
+    
+    console.log(`DXX Dashboard initialized: Showing ${games.length} of ${gameMeta.totalGames} games`);
   } catch (err) {
     console.error("Failed to load data:", err);
     document.getElementById("gamesBody").innerHTML =
@@ -680,6 +860,78 @@
   } finally {
     overlay.classList.add("hidden");
   }
+
+  // ── Load All Modal Handlers ──────────────────────────────────
+  const loadAllModal = document.getElementById('loadAllModal');
+  const loadAllBtn = document.getElementById('loadAllBtn');
+  const confirmLoadBtn = document.getElementById('confirmLoadAll');
+  const cancelLoadBtn = document.getElementById('cancelLoadAll');
+  const modalBackdrop = loadAllModal.querySelector('.modal-backdrop');
+
+  function openLoadAllModal() {
+    loadAllModal.classList.add('active');
+  }
+
+  function closeLoadAllModal() {
+    loadAllModal.classList.remove('active');
+  }
+
+  loadAllBtn.addEventListener('click', openLoadAllModal);
+  cancelLoadBtn.addEventListener('click', closeLoadAllModal);
+  modalBackdrop.addEventListener('click', closeLoadAllModal);
+
+  confirmLoadBtn.addEventListener('click', async () => {
+    closeLoadAllModal();
+    overlay.classList.remove('hidden');
+    const loadingText = document.getElementById('loadingText');
+    const progressText = document.getElementById('loadingProgress');
+    
+    try {
+      loadingText.textContent = 'Loading all games...';
+      progressText.textContent = 'Downloading 44 MB of game data...';
+      
+      // Load Firebase games
+      await loadFirebaseGames();
+      
+      // Load all archive games at once
+      const response = await fetch(`${API_BASE}/api/games?all=true`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      
+      const data = await response.json();
+      
+      // Combine Firebase + all archive games
+      games = [...firebaseGames, ...data.games];
+      players = data.players;
+      
+      ensureGameIds();
+      DXXFilters.setData(games, players, gameMeta);
+      allGamesLoaded = true;
+      
+      progressText.textContent = `Loaded ${games.length.toLocaleString()} games`;
+      
+      // Hide Load All button and placeholder text
+      loadAllBtn.parentElement.style.display = 'none';
+      
+      // Hide placeholder text and show filter buttons
+      const placeholderText = document.getElementById('filterPlaceholderText');
+      if (placeholderText) placeholderText.style.display = 'none';
+      
+      // Show Apply/Clear/Charts buttons (they were hidden initially)
+      document.getElementById('applyFilters').style.display = 'inline-block';
+      document.getElementById('clearFilters').style.display = 'inline-block';
+      document.getElementById('toggleCharts').style.display = 'inline-block';
+      
+      // Render the data
+      switchView("all");
+      
+      console.log(`All games loaded: ${games.length} total games, ${players.length} players`);
+    } catch (err) {
+      console.error('Error loading all games:', err);
+      alert('Failed to load games. Please check your connection and try again.');
+    } finally {
+      overlay.classList.add('hidden');
+    }
+  });
 
   // Note: Real-time updates disabled when using JSON file.
   // Re-run scraper/scrape-to-json.js to update data.

@@ -24,8 +24,8 @@
         <button class="tab" data-mode="ffa">Free-For-All</button>
       </div>
       <div class="nav-links">
-        <a href="live.html" class="nav-link active">Archive</a>
         <a href="index.html" class="nav-link">Live Games</a>
+        <a href="live.html" class="nav-link active">Game Archive</a>
       </div>
     </div>
   </nav>
@@ -67,9 +67,10 @@
           <option value="D1">Descent 1</option>
           <option value="D2">Descent 2</option>
         </select>
-        <button id="applyFilters" class="btn-primary">Apply</button>
-        <button id="clearFilters" class="btn-secondary">Clear</button>
-        <button class="btn-secondary" id="toggleCharts">Show Charts</button>
+        <button id="applyFilters" class="btn-primary" style="display: none;">Apply</button>
+        <button id="clearFilters" class="btn-secondary" style="display: none;">Clear</button>
+        <button class="btn-secondary" id="toggleCharts" style="display: none;">Show Charts</button>
+        <span id="filterPlaceholderText" style="color: var(--text-dim); font-size: 0.9rem;"></span>
       </div>
       <table id="gamesTable">
         <thead>
@@ -88,6 +89,11 @@
       </table>
     </div>
     <div class="pagination" id="pagination"></div>
+    <div style="text-align: center; margin: 2rem 0;">
+      <button id="loadAllBtn" class="btn-load-all">Load Full Game Archive</button>
+      <div style="font-size: 0.85rem; color: var(--text-dim); margin-top: 0.5rem;">
+      </div>
+    </div>
   </section>
 
   <!-- ───── 1v1 Duel View ───── -->
@@ -105,6 +111,23 @@
     <div class="ffa-list" id="ffaList"></div>
     <div class="pagination" id="ffaPagination"></div>
   </section>
+
+  <!-- ───── Load All Confirmation Modal ───── -->
+  <div class="confirm-modal" id="loadAllModal">
+    <div class="modal-backdrop"></div>
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <h3>⚠️ Load Full Archive</h3>
+        <p>You're about to load <strong>all 61,000+ games</strong> from the archive.</p>
+        <p>This will download approximately <strong>44 MB</strong> of data and may take <strong>10-30 seconds</strong> depending on your connection speed.</p>
+        <p style="color: var(--text-dim); font-size: 0.9rem; margin-top: 1rem;">Once loaded, all filtering will be instant. Your browser will cache the data for the current session.</p>
+        <div class="modal-actions">
+          <button id="confirmLoadAll" class="btn-primary">Load All Games</button>
+          <button id="cancelLoadAll" class="btn-secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- ───── Game Detail Modal ───── -->
   <div class="game-detail-modal" id="gameDetailModal">

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Simple HTTP server with CORS and pagination API for serving DXX Dashboard.
+Simple HTTPS server with CORS and pagination API for serving DXX Dashboard.
 """
 import http.server
 import socketserver
@@ -8,11 +8,16 @@ import signal
 import sys
 import json
 import os
-from urllib.parse import urlparse, parse_qs
+import ssl
+import urllib.request
+from urllib.parse import urlparse, parse_qs, quote
 
-PORT = 8080
+PORT = 8443
+TRACKER_API = 'https://127.0.0.1:9998'
 DIRECTORY = "public"
 GAMES_FILE = os.path.join(DIRECTORY, "data", "games.json")
+CERT_FILE = "server.crt"
+KEY_FILE = "server.key"
 
 # Cache the games data in memory
 _games_cache = None
@@ -63,8 +68,17 @@ class CORSRequestHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         parsed_path = urlparse(self.path)
         
+        # Proxy: /api/events/* → tracker HTTP API on port 9998
+        if parsed_path.path.startswith('/api/events/'):
+            self.proxy_tracker_api(parsed_path)
+        # Proxy: /api/firebase/* → tracker HTTP API on port 9998
+        elif parsed_path.path.startswith('/api/firebase/'):
+            self.proxy_tracker_api(parsed_path)
+        # Proxy: /api/tracker/status → tracker status
+        elif parsed_path.path == '/api/tracker/status':
+            self.proxy_tracker_api(parsed_path)
         # API endpoint for paginated games
-        if parsed_path.path == '/api/games':
+        elif parsed_path.path == '/api/games':
             self.handle_games_api(parsed_path)
         # API endpoint for game metadata (counts)
         elif parsed_path.path == '/api/games/meta':
@@ -76,6 +90,32 @@ class CORSRequestHandler(http.server.SimpleHTTPRequestHandler):
         else:
             # Regular file serving
             super().do_GET()
+    
+    def proxy_tracker_api(self, parsed_path):
+        """Proxy requests to the tracker HTTPS API on port 9998"""
+        try:
+            url = f"{TRACKER_API}{parsed_path.path}"
+            if parsed_path.query:
+                url += f"?{parsed_path.query}"
+            # Skip SSL verification for self-signed cert (local loopback)
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=5, context=ctx) as resp:
+                body = resp.read()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(body)
+        except Exception as e:
+            self.send_response(502)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                'error': 'Tracker API unavailable',
+                'detail': str(e)
+            }).encode())
     
     def handle_single_game(self, game_id):
         """Return a single game by ID"""
@@ -155,38 +195,54 @@ class CORSRequestHandler(http.server.SimpleHTTPRequestHandler):
             query = parse_qs(parsed_path.query)
             page = int(query.get('page', ['1'])[0])
             limit = int(query.get('limit', ['100'])[0])
-            
-            # Limit max page size
-            limit = min(limit, 500)
+            load_all = query.get('all', ['false'])[0].lower() == 'true'
             
             data = load_games_data()
             
             games = data.get('games', [])
             players = data.get('players', [])
             
-            # Calculate pagination
-            total = len(games)
-            start = (page - 1) * limit
-            end = start + limit
-            
-            page_games = games[start:end]
-            
-            response = {
-                'games': page_games,
-                'players': players,
-                'pagination': {
-                    'page': page,
-                    'limit': limit,
-                    'total': total,
-                    'totalPages': (total + limit - 1) // limit,
-                    'hasMore': end < total
+            # If load_all is requested, return everything
+            if load_all:
+                response = {
+                    'games': games,
+                    'players': players,
+                    'pagination': {
+                        'page': 1,
+                        'limit': len(games),
+                        'total': len(games),
+                        'totalPages': 1,
+                        'hasMore': False
+                    }
                 }
-            }
+            else:
+                # Limit max page size
+                limit = min(limit, 500)
+                
+                # Calculate pagination
+                total = len(games)
+                start = (page - 1) * limit
+                end = start + limit
+                
+                page_games = games[start:end]
+                
+                response = {
+                    'games': page_games,
+                    'players': players,
+                    'pagination': {
+                        'page': page,
+                        'limit': limit,
+                        'total': total,
+                        'totalPages': (total + limit - 1) // limit,
+                        'hasMore': end < total
+                    }
+                }
             
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
             self.wfile.write(json.dumps(response).encode())
+
             
         except Exception as e:
             self.send_error(500, f"Error loading games: {str(e)}")
@@ -212,9 +268,22 @@ if __name__ == '__main__':
         print(f"Warning: Failed to pre-load cache: {e}")
     
     with ReusableTCPServer(("", PORT), CORSRequestHandler) as httpd:
-        print(f" Server running at http://localhost:{PORT}/")
+        # Wrap socket with SSL
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(CERT_FILE, KEY_FILE)
+        httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+        
+        import socket
+        hostname = socket.gethostname()
+        try:
+            local_ip = socket.gethostbyname(hostname)
+        except Exception:
+            local_ip = '0.0.0.0'
+        print(f" 🔒 HTTPS Server running at https://{local_ip}:{PORT}/")
         print(f" Serving directory: {DIRECTORY}")
         print(f" API endpoints: /api/games/meta, /api/games?page=1&limit=100")
+        print(f" Press Ctrl+C to stop")
+        print(f" Note: You'll need to accept the self-signed certificate in your browser")
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:

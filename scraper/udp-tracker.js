@@ -32,7 +32,7 @@ const dgram = require('dgram');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { parseGamelogContent, replaceLocalPlayer, summarize, EVENT } = require('./gamelog-parser');
+const firebase = require('./firebase-service');
 
 // ── Configuration ───────────────────────────────────────────────
 const CONFIG = {
@@ -44,23 +44,7 @@ const CONFIG = {
   gameTimeout: 300000,      // 5 min — consider game dead
   cleanupInterval: 60000,   // Check for dead games every minute
   pollInterval: 5000,       // Poll games for stats every 5 seconds
-  gamelogDirs: resolveGamelogDirs(),
-  gamelogPollInterval: 1000, // Check gamelog for updates every 1s
 };
-
-function resolveGamelogDirs() {
-  const home = os.homedir();
-  if (process.env.GAMELOG_DIR) {
-    return process.env.GAMELOG_DIR.split(':').filter(Boolean);
-  }
-  const candidates = [
-    path.join(home, '.d1x-redux'),
-    path.join(home, '.d2x-redux'),
-    path.join(home, '.d1x-rebirth'),
-    path.join(home, '.d2x-rebirth'),
-  ];
-  return candidates.filter(d => fs.existsSync(d));
-}
 
 // ── Protocol Constants (from pudlez/PyTracker dxxtoolkit.py) ────
 const OP = {
@@ -72,26 +56,172 @@ const OP = {
   GAME_INFO_LITE: 5,
   REGISTER_ACK: 21,
   GAME_LIST_RESPONSE: 22,
+  PDATA: 13,                // Player position data
+  MDATA_PNORM: 19,          // Multiplayer data (normal)
+  MDATA_PNEEDACK: 20,       // Multiplayer data (needs ACK)
+  OBSDATA: 25,              // Observer data
+  UPID_GAMELOG_KILL: 31,    // Gamelog kill event
+  UPID_GAMELOG_CHAT: 32,    // Gamelog chat event
   WEBUI_IPC: 99,
 };
 const TRACKER_PROTOCOL_VERSION = 0;
 
+// ── Weapon Names (for kill feed display) ────
+// Weapon ID → Name mapping (from DXX-Redux weapon.h)
+// weapon_type: 0=Weapon kill, 1=Robot kill, 2=unused, 3=Environment
+const WEAPON_NAMES = {
+  // ── Descent 1 Weapons ──
+  0: 'Laser L1',
+  1: 'Laser L2',
+  2: 'Laser L3',
+  3: 'Laser L4',
+  8: 'Concussion Missile',
+  9: 'Flare',
+  11: 'Vulcan Cannon',
+  12: 'X-Spreadfire',
+  13: 'Plasma Cannon',
+  14: 'Fusion Cannon',
+  15: 'Homing Missile',
+  16: 'Proximity Bomb',
+  17: 'Smart Missile',
+  18: 'Mega Missile',
+  19: 'Smart Blob',
+  20: 'Spreadfire',
+  21: 'Mech Missile',
+  22: 'Mech Missile 2',
+  23: 'Silent Spreadfire',
+  29: 'Robot Smart Blob',
+  
+  // ── Descent 2 Weapons ──
+  30: 'Super Laser L5',
+  31: 'Super Laser L6',
+  32: 'Gauss Cannon',
+  33: 'Helix Cannon',
+  34: 'Phoenix Cannon',
+  35: 'Omega Cannon',
+  36: 'Flash Missile',
+  37: 'Guided Missile',
+  38: 'Super Proximity Bomb',
+  39: 'Mercury Missile',
+  40: 'Earthshaker',
+  47: 'Smart Mine Blob',
+  49: 'Robot Smart Mine',
+  51: 'Designer Mine',
+  53: 'Robot Super Proximity',
+  54: 'Earthshaker Mega',
+  58: 'Robot Earthshaker',
+};
+
+// Environment death subcategories (weapon_type = 3)
+const ENVIRONMENT_DEATHS = {
+  0: 'Wall Collision',
+  1: 'Lava',
+  2: 'Matcen',
+};
+
+function getWeaponName(weaponType, weaponId) {
+  // weaponType: 0=Weapon, 1=Robot, 2=Collision, 3=Environment
+  if (weaponType === 1) return 'Robot';
+  if (weaponType === 2) return 'Collision';
+  if (weaponType === 3) return ENVIRONMENT_DEATHS[weaponId] || 'Environment';
+  
+  // weaponType 0 = Weapon kill
+  return WEAPON_NAMES[weaponId] || `Weapon ${weaponId}`;
+}
+
+// ── Game Engine Message Types (from multi.h) ────
+const MULTI = {
+  POSITION: 0,
+  REAPPEAR: 1,
+  FIRE: 2,
+  KILL: 3,
+  REMOVE_OBJECT: 4,
+  PLAYER_EXPLODE: 5,
+  MESSAGE: 6,
+  QUIT: 7,
+  PLAY_SOUND: 8,
+  BEGIN_SYNC: 9,
+  CONTROLCEN: 10,
+  CLAIM_ROBOT: 11,
+  END_SYNC: 12,
+  CLOAK: 13,
+  ENDLEVEL_START: 14,
+  DOOR_OPEN: 15,
+  CREATE_EXPLOSION: 16,
+  CONTROLCEN_FIRE: 17,
+  PLAYER_DROP: 18,
+  CREATE_POWERUP: 19,
+  CONSISTENCY: 20,
+  DECLOAK: 21,
+  MENU_CHOICE: 22,
+  ROBOT_POSITION: 23,
+  ROBOT_EXPLODE: 24,
+  ROBOT_RELEASE: 25,
+  ROBOT_FIRE: 26,
+  SCORE: 27,
+  CREATE_ROBOT: 28,
+  TRIGGER: 29,
+  BOSS_ACTIONS: 30,
+  CREATE_ROBOT_POWERUPS: 31,
+  HOSTAGE_DOOR: 32,
+  SAVE_GAME: 33,
+  RESTORE_GAME: 34,
+  REQ_PLAYER: 35,
+  DO_BOUNTY: 36,
+  TYPING_STATE: 37,
+  GMODE_UPDATE: 38,
+  KILL_GOAL_COUNTS: 39,
+  SEISMIC: 40,
+  LIGHT: 41,
+  START_TRIGGER: 42,
+  FLAGS: 43,
+  DROP_BLOBS: 44,
+  POWERUP_UPDATE: 45,
+  ACTIVE_DOOR: 46,
+  SOUND_FUNCTION: 47,
+  CAPTURE_BONUS: 48,
+  GOT_FLAG: 49,
+  DROP_FLAG: 50,
+  ROBOT_CONTROLS: 51,
+  FINISH_GAME: 52,
+  RANK: 53,
+  MODEM_PING: 54,
+  MODEM_PING_RETURN: 55,
+  ORB_BONUS: 56,
+  GOT_ORB: 57,
+  DROP_ORB: 58,
+  PLAY_BY_PLAY: 59,
+  OBS_UPDATE: 60,
+  OBS_MESSAGE: 61,
+  SHIP_STATUS: 62,
+  MARKER: 63,
+  TURKEY_TARGET: 64,
+  TURKEY_TIME_SYNC: 65,
+};
+
 // ── State ───────────────────────────────────────────────────────
 const activeGames = new Map(); // "ip:gamePort" → game entry
+const gameEvents = new Map();  // "ip:gamePort" → { killFeed: [], chat: [], timeline: [] }
 const wsClients = [];
 let server = null;
 let wss = null;
 
-// ── Gamelog State ────────────────────────────────────────────────
-let gamelogPos = {};          // path → file position (for tailing)
-let gamelogEvents = [];       // accumulated events for current game
-let gamelogSummary = null;    // running summary
-let localPlayerName = null;   // detected local player name (from env or active game)
-
-// ── Multi-client gamelog merging ────────────────────────────────
-// Each client can upload their gamelog. We store per-player events
-// and merge them into a combined view.
-const clientGamelogs = new Map(); // playerName → { events: [], raw: '' }
+// ── Player name utilities ──────────────────────────────────────
+/**
+ * Build a unique display name for a player, appending "(N)" if
+ * multiple players share the same name (e.g. "code (1)", "code (2)").
+ */
+function getUniquePlayerName(players, pnum) {
+  if (!players || !players[pnum]) return `Player ${pnum}`;
+  const name = players[pnum].name;
+  // Check for duplicate names
+  const dupeIndices = [];
+  players.forEach((p, i) => { if (p && p.name === name) dupeIndices.push(i); });
+  if (dupeIndices.length <= 1) return name;
+  // Append 1-based order among duplicates
+  const order = dupeIndices.indexOf(pnum) + 1;
+  return `${name} (${order})`;
+}
 
 // ── Ensure output directory ─────────────────────────────────────
 function ensureEventsDir() {
@@ -162,6 +292,31 @@ function handlePacket(packet, rinfo) {
       handleGameInfoResponse(packet, rinfo);
       break;
 
+    case OP.PDATA: // 13
+      // Player position data - silently ignore (high frequency)
+      break;
+
+    case OP.MDATA_PNORM: // 19
+    case OP.MDATA_PNEEDACK: // 20
+      console.log(`   📨 MDATA (opcode ${opcode})`);
+      handleMDATA(packet, rinfo, opcode);
+      break;
+
+    case OP.OBSDATA: // 25
+      console.log(`   👁️  OBSDATA`);
+      handleOBSDATA(packet, rinfo);
+      break;
+
+    case OP.UPID_GAMELOG_KILL: // 31
+      console.log(`   💀 GAMELOG_KILL (${packet.length} bytes from ${rinfo.address}:${rinfo.port})`);
+      handleGamelogKill(packet, rinfo);
+      break;
+
+    case OP.UPID_GAMELOG_CHAT: // 32
+      console.log(`   💬 GAMELOG_CHAT (${packet.length} bytes from ${rinfo.address}:${rinfo.port})`);
+      handleGamelogChat(packet, rinfo);
+      break;
+
     case OP.WEBUI_IPC: // 99
       handleWebUIPing(packet, rinfo);
       break;
@@ -169,6 +324,417 @@ function handlePacket(packet, rinfo) {
     default:
       console.log(`   ❓ Unknown opcode ${opcode}`);
       break;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MDATA Packet Handler - Multiplayer Data
+// Format: [opcode][token:4][player_num:1][pkt_num:4?][multibuf_data...]
+// The multibuf_data contains game events (kills, chat, etc)
+// ═══════════════════════════════════════════════════════════════
+function handleMDATA(packet, rinfo, opcode) {
+  try {
+    if (packet.length < 10) return;
+
+    let offset = 1; // Skip opcode
+    const token = packet.readUInt32LE(offset); offset += 4;
+    const playerNum = packet[offset]; offset += 1;
+
+    // If opcode requires ACK, skip pkt_num
+    if (opcode === OP.MDATA_PNEEDACK) {
+      offset += 4; // Skip pkt_num
+    }
+
+    if (offset >= packet.length) return;
+
+    // The rest is multibuf data - first byte is message type
+    const msgType = packet[offset];
+    const multibuf = packet.slice(offset);
+
+    // Find which game this belongs to
+    let game = null;
+    for (const [key, g] of activeGames.entries()) {
+      if (g.ip === rinfo.address && g.gameId === token) {
+        game = g;
+        break;
+      }
+    }
+
+    if (!game) {
+      // Try to find by IP alone for unconfirmed games
+      for (const [key, g] of activeGames.entries()) {
+        if (g.ip === rinfo.address) {
+          game = g;
+          break;
+        }
+      }
+    }
+
+    if (!game) return;
+
+    // Get or create event storage for this game
+    if (!gameEvents.has(game.id)) {
+      gameEvents.set(game.id, {
+        killFeed: [],
+        chat: [],
+        timeline: [],
+        startTime: Date.now(),
+      });
+    }
+
+    const events = gameEvents.get(game.id);
+    const timestamp = Date.now();
+    const gameTime = ((timestamp - events.startTime) / 1000).toFixed(1);
+
+    // Parse based on message type
+    parseMULTIMessage(msgType, multibuf, playerNum, game, events, gameTime);
+
+  } catch (err) {
+    console.error(`   MDATA parse error: ${err.message}`);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// OBSDATA Packet Handler - Observer Data
+// Similar to MDATA but from observer perspective
+// ═══════════════════════════════════════════════════════════════
+function handleOBSDATA(packet, rinfo) {
+  // Observer data uses similar format to MDATA
+  handleMDATA(packet, rinfo, OP.OBSDATA);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Gamelog Network Packets - Direct from Game
+// ═══════════════════════════════════════════════════════════════
+
+// UPID_GAMELOG_KILL (31): Kill events
+// Format: [opcode:1][timestamp:8][killer_id:1][killed_id:1][weapon_type:1][weapon_id:1] = 13 bytes
+function handleGamelogKill(packet, rinfo) {
+  try {
+    if (packet.length < 13) {
+      console.log(`     Invalid GAMELOG_KILL length: ${packet.length}`);
+      return;
+    }
+
+    let offset = 1; // Skip opcode
+    // fix64 timestamp (8 bytes) - game time in microseconds
+    const timestampLow = packet.readUInt32LE(offset); offset += 4;
+    const timestampHigh = packet.readUInt32LE(offset); offset += 4;
+    const gameTimeUs = timestampLow + (timestampHigh * 0x100000000);
+    const gameTime = (gameTimeUs / 1000000).toFixed(1); // Convert to seconds
+
+    const killerId = packet[offset]; offset += 1;
+    const killedId = packet[offset]; offset += 1;
+    const weaponType = packet[offset]; offset += 1;
+    const weaponId = packet[offset]; offset += 1;
+
+    console.log(`     Timestamp: ${gameTime}s, Killer: ${killerId}, Killed: ${killedId}, Weapon: ${weaponType}/${weaponId}`);
+
+    // Find the game by source IP (packets come from random port!)
+    let game = null;
+    for (const [, g] of activeGames) {
+      if (g.ip === rinfo.address) {
+        game = g;
+        console.log(`     ✅ Matched to game: ${g.gameName || g.id} (game port: ${g.port})`);
+        break;
+      }
+    }
+
+    if (!game) {
+      console.log(`     ❌ No active game found for IP ${rinfo.address}`);
+      console.log(`     Active games: ${Array.from(activeGames.values()).map(g => `${g.ip}:${g.port}`).join(', ')}`);
+      return;
+    }
+
+    // Get or create events for this game
+    if (!gameEvents.has(game.id)) {
+      gameEvents.set(game.id, {
+        killFeed: [],
+        chat: [],
+        timeline: [],
+        startTime: Date.now(),
+      });
+    }
+
+    const events = gameEvents.get(game.id);
+    const players = game.players || [];
+    const getPlayerName = (pnum) => getUniquePlayerName(players, pnum);
+
+    const killerName = getPlayerName(killerId);
+    const killedName = getPlayerName(killedId);
+    const weaponName = getWeaponName(weaponType, weaponId);
+    const isSuicide = killerId === killedId;
+
+    const killEvent = {
+      type: 'kill',
+      time: gameTime,
+      timestamp: new Date().toISOString(),
+      killer: killerName,
+      killerNum: killerId,
+      killed: killedName,
+      killedNum: killedId,
+      weapon: weaponName,
+      weaponType,
+      weaponId,
+    };
+
+    events.killFeed.unshift(killEvent);
+    events.timeline.push(killEvent);
+
+    if (events.killFeed.length > 100) events.killFeed.pop();
+    if (events.timeline.length > 500) events.timeline.shift();
+
+    console.log(`     💀 ${killerName} ${isSuicide ? 'died' : '→ ' + killedName} (${weaponName}) @ ${gameTime}s`);
+
+    // Update player stats
+    const killer = players[killerId];
+    const killed = players[killedId];
+    if (killer && killed) {
+      if (isSuicide) {
+        killer.suicides = (killer.suicides || 0) + 1;
+        killer.deaths = (killer.deaths || 0) + 1;
+      } else {
+        killer.kills = (killer.kills || 0) + 1;
+        killed.deaths = (killed.deaths || 0) + 1;
+      }
+    }
+
+  } catch (err) {
+    console.error(`     GAMELOG_KILL parse error: ${err.message}`);
+  }
+}
+
+// UPID_GAMELOG_CHAT (32): Chat messages
+// Format: [opcode:1][timestamp:8][player_id:1][message:variable]
+function handleGamelogChat(packet, rinfo) {
+  try {
+    if (packet.length < 11) {
+      console.log(`     Invalid GAMELOG_CHAT length: ${packet.length}`);
+      return;
+    }
+
+    let offset = 1; // Skip opcode
+    // fix64 timestamp (8 bytes)
+    const timestampLow = packet.readUInt32LE(offset); offset += 4;
+    const timestampHigh = packet.readUInt32LE(offset); offset += 4;
+    const gameTimeUs = timestampLow + (timestampHigh * 0x100000000);
+    const gameTime = (gameTimeUs / 1000000).toFixed(1);
+
+    const playerId = packet[offset]; offset += 1;
+    const message = packet.slice(offset).toString('utf8').replace(/\0/g, '').trim();
+
+    if (!message) return;
+
+    console.log(`     Timestamp: ${gameTime}s, Player: ${playerId}, Message: "${message}"`);
+
+    // Find the game by source IP (packets come from random port!)
+    let game = null;
+    for (const [, g] of activeGames) {
+      if (g.ip === rinfo.address) {
+        game = g;
+        console.log(`     ✅ Matched to game: ${g.gameName || g.id}`);
+        break;
+      }
+    }
+
+    if (!game) {
+      console.log(`     ❌ No active game found for IP ${rinfo.address}`);
+      console.log(`     Active games: ${Array.from(activeGames.values()).map(g => `${g.ip}:${g.port}`).join(', ')}`);
+      return;
+    }
+
+    // Get or create events for this game
+    if (!gameEvents.has(game.id)) {
+      gameEvents.set(game.id, {
+        killFeed: [],
+        chat: [],
+        timeline: [],
+        startTime: Date.now(),
+      });
+    }
+
+    const events = gameEvents.get(game.id);
+    const players = game.players || [];
+    const getPlayerName = (pnum) => getUniquePlayerName(players, pnum);
+
+    const playerName = getPlayerName(playerId);
+
+    const chatEvent = {
+      type: 'chat',
+      time: gameTime,
+      timestamp: new Date().toISOString(),
+      from: playerName,
+      fromNum: playerId,
+      player: playerName,
+      message: message,
+    };
+
+    events.chat.push(chatEvent);
+    events.timeline.push(chatEvent);
+
+    if (events.chat.length > 200) events.chat.shift();
+    if (events.timeline.length > 500) events.timeline.shift();
+
+    console.log(`     💬 ${playerName}: ${message} @ ${gameTime}s`);
+
+  } catch (err) {
+    console.error(`     GAMELOG_CHAT parse error: ${err.message}`);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Parse MULTI message types from multibuf
+// ═══════════════════════════════════════════════════════════════
+function parseMULTIMessage(msgType, buf, senderNum, game, events, gameTime) {
+  try {
+    const players = game.players || [];
+    const getPlayerName = (pnum) => getUniquePlayerName(players, pnum);
+
+    switch (msgType) {
+      case MULTI.KILL: {
+        // Format: [MULTI_KILL][killer:1][killed:1]
+        if (buf.length >= 3) {
+          const killer = buf[1];
+          const killed = buf[2];
+          const killerName = getPlayerName(killer);
+          const killedName = getPlayerName(killed);
+
+          const killEvent = {
+            type: 'kill',
+            time: gameTime,
+            timestamp,
+            killer: killerName,
+            killerNum: killer,
+            killed: killedName,
+            killedNum: killed,
+            weapon: 'Unknown',
+          };
+
+          events.killFeed.unshift(killEvent);
+          events.timeline.push(killEvent);
+
+          // Keep only last 100 kills
+          if (events.killFeed.length > 100) events.killFeed.pop();
+          if (events.timeline.length > 500) events.timeline.shift();
+
+          console.log(`   💀 Kill: ${killerName} → ${killedName} @ ${gameTime}s`);
+        }
+        break;
+      }
+
+      case MULTI.MESSAGE: {
+        // Format: [MULTI_MESSAGE][from:1][text:MAX_MESSAGE_LEN]
+        if (buf.length >= 3) {
+          const from = buf[1];
+          const text = buf.slice(2).toString('ascii').replace(/\0/g, '').trim();
+          if (text.length > 0) {
+            const chatEvent = {
+              type: 'chat',
+              time: gameTime,
+              timestamp,
+              from: getPlayerName(from),
+              fromNum: from,
+              message: text,
+            };
+
+            events.chat.push(chatEvent);
+            events.timeline.push(chatEvent);
+
+            // Keep only last 200 chat messages
+            if (events.chat.length > 200) events.chat.shift();
+            if (events.timeline.length > 500) events.timeline.shift();
+
+            console.log(`   💬 Chat: ${getPlayerName(from)}: ${text}`);
+          }
+        }
+        break;
+      }
+
+      case MULTI.OBS_MESSAGE: {
+        // Observer chat message
+        if (buf.length >= 3) {
+          const from = buf[1];
+          const text = buf.slice(2).toString('ascii').replace(/\0/g, '').trim();
+          if (text.length > 0) {
+            const chatEvent = {
+              type: 'chat',
+              time: gameTime,
+              timestamp,
+              from: 'Observer',
+              fromNum: from,
+              message: text,
+              isObserver: true,
+            };
+
+            events.chat.push(chatEvent);
+            events.timeline.push(chatEvent);
+
+            if (events.chat.length > 200) events.chat.shift();
+            if (events.timeline.length > 500) events.timeline.shift();
+
+            console.log(`   💬 Observer: ${text}`);
+          }
+        }
+        break;
+      }
+
+      case MULTI.PLAYER_EXPLODE: {
+        // Player died/exploded
+        if (buf.length >= 2) {
+          const playerNum = buf[1];
+          const playerName = getPlayerName(playerNum);
+
+          const deathEvent = {
+            type: 'death',
+            time: gameTime,
+            timestamp,
+            player: playerName,
+            playerNum,
+          };
+
+          events.timeline.push(deathEvent);
+          if (events.timeline.length > 500) events.timeline.shift();
+
+          console.log(`   💥 Death: ${playerName} @ ${gameTime}s`);
+        }
+        break;
+      }
+
+      case MULTI.QUIT: {
+        // Player quit
+        if (buf.length >= 2) {
+          const playerNum = buf[1];
+          const playerName = getPlayerName(playerNum);
+
+          const quitEvent = {
+            type: 'quit',
+            time: gameTime,
+            timestamp,
+            player: playerName,
+            playerNum,
+          };
+
+          events.timeline.push(quitEvent);
+          if (events.timeline.length > 500) events.timeline.shift();
+
+          console.log(`   🚪 Quit: ${playerName} @ ${gameTime}s`);
+        }
+        break;
+      }
+
+      // Silently ignore high-frequency packets
+      case MULTI.POSITION:
+      case MULTI.FIRE:
+      case MULTI.ROBOT_POSITION:
+        break;
+
+      default:
+        // Log unknown message types for debugging
+        // console.log(`   🔍 Unknown MULTI type: ${msgType}`);
+        break;
+    }
+  } catch (err) {
+    console.error(`   MULTI parse error: ${err.message}`);
   }
 }
 
@@ -819,19 +1385,6 @@ function writeGamelistFile() {
     updated: new Date().toISOString(),
     gameCount: games.length,
     games,
-    // Include full gamelog summary for the game detail page
-    gamelog: gamelogSummary ? {
-      totalKills: gamelogSummary.totalKills || 0,
-      totalDeaths: gamelogSummary.totalDeaths || 0,
-      totalEvents: gamelogSummary.totalEvents || 0,
-      players: gamelogSummary.players || [],
-      killFeed: (gamelogSummary.killFeed || []).slice(-50),
-      killMatrix: gamelogSummary.killMatrix || {},
-      timeline: (gamelogSummary.timeline || []).slice(-100),
-      chatLog: (gamelogSummary.chatLog || []).slice(-50),
-      damageBreakdown: (gamelogSummary.damageBreakdown || []).slice(0, 30),
-      clientCount: 1 + clientGamelogs.size, // how many perspectives merged
-    } : null,
   };
 
   try {
@@ -856,8 +1409,23 @@ function saveGameData(g) {
 
 // ── Archive concluded game to games.json history ────────────────
 function archiveGameToHistory(g) {
-  if (!g || !g.confirmed || !g.players || g.players.length === 0) {
-    return; // Only archive confirmed games with players
+  // Debug logging
+  console.log(`\n📦 Attempting to archive game: ${g?.gameName || 'unknown'}`);
+  console.log(`   Confirmed: ${!!g?.confirmed}, Players: ${g?.players?.length || 0}`);
+  
+  if (!g) {
+    console.log(`   ⏭️  Skipping archive: Game object is null/undefined`);
+    return;
+  }
+  
+  if (!g.confirmed) {
+    console.log(`   ⏭️  Skipping archive: Game was never confirmed (${g.gameName})`);
+    return; // Only archive confirmed games
+  }
+  
+  if (!g.players || g.players.length === 0) {
+    console.log(`   ⏭️  Skipping archive: No players in game (${g.gameName})`);
+    return; // Only archive games with players
   }
 
   try {
@@ -873,14 +1441,11 @@ function archiveGameToHistory(g) {
 
     const gameId = `game-${dateStr}-${sanitizedName}-${sanitizedMap}`;
 
-    // ── Snapshot the gamelog data BEFORE it gets reset ──
-    const summary = clientGamelogs.size > 0 ? getMergedGamelogSummary() : gamelogSummary;
-
-    // Build enriched player data by merging UDP stats + gamelog stats
+    // Build player data from UDP stats
     const enrichedPlayers = g.players.map(p => {
       const kills = p.kills || 0;
       const deaths = p.deaths || 0;
-      const base = {
+      return {
         name: p.name || 'Unknown',
         kills,
         deaths,
@@ -890,27 +1455,6 @@ function archiveGameToHistory(g) {
         color: p.color || 0,
         score: p.score || 0,
       };
-
-      // Merge rich gamelog stats if available
-      if (summary && summary.players) {
-        const lp = summary.players.find(
-          sp => sp.name.toLowerCase() === (p.name || '').toLowerCase()
-        );
-        if (lp) {
-          base.kills = Math.max(base.kills, lp.kills || 0);
-          base.deaths = Math.max(base.deaths, lp.deaths || 0);
-          base.suicides = Math.max(base.suicides, lp.suicides || 0);
-          base.kdRatio = base.deaths > 0 ? +(base.kills / base.deaths).toFixed(2) : base.kills;
-          if (lp.maxKillStreak) base.maxKillStreak = lp.maxKillStreak;
-          if (lp.weapons) base.weapons = lp.weapons;
-          if (lp.killedBy) base.killedBy = lp.killedBy;
-          if (lp.victims) base.victims = lp.victims;
-          if (lp.damageDealt) base.damageDealt = lp.damageDealt;
-          if (lp.damageTaken) base.damageTaken = lp.damageTaken;
-        }
-      }
-
-      return base;
     });
 
     // Calculate game duration
@@ -941,20 +1485,29 @@ function archiveGameToHistory(g) {
       gameType: (g.playerCount || g.players.length) === 2 ? '1v1' :
                 (g.playerCount || g.players.length) > 2 ? 'FFA' : 'Unknown',
       disallowedItems: [],
+      killMatrix: g.killMatrix || null,
     };
 
-    // Include kill matrix (prefer UDP packet data, fallback to gamelog)
-    if (g.killMatrix) {
-      gameEntry.killMatrix = g.killMatrix;
-    } else if (summary && summary.killMatrix) {
-      gameEntry.killMatrix = summary.killMatrix;
-    }
+    // ── Build event data for Firebase ──
+    const events = gameEvents.get(g.id);
+    let eventData = null;
+    if (events && (events.killFeed.length > 0 || events.chat.length > 0 || events.timeline.length > 0)) {
+      // Build named kill matrix from array format
+      let namedKillMatrix = null;
+      if (Array.isArray(g.killMatrix) && enrichedPlayers.length > 0) {
+        namedKillMatrix = {};
+        enrichedPlayers.forEach((p, i) => {
+          const dn = getUniquePlayerName(g.players, i);
+          namedKillMatrix[dn] = {};
+          enrichedPlayers.forEach((p2, j) => {
+            namedKillMatrix[dn][getUniquePlayerName(g.players, j)] =
+              (g.killMatrix[i] && g.killMatrix[i][j]) || 0;
+          });
+        });
+      }
 
-    // ── Save full event file for game detail view ──
-    if (summary && (summary.totalKills > 0 || summary.totalEvents > 0)) {
-      const eventData = {
+      eventData = {
         id: gameId,
-        filename: gameEntry.filename,
         timestamp: gameEntry.timestamp,
         gameName: gameEntry.gameName,
         mission: gameEntry.mission,
@@ -962,67 +1515,29 @@ function archiveGameToHistory(g) {
         mode: gameEntry.mode,
         level: gameEntry.levelNumber,
         players: enrichedPlayers,
-        killFeed: summary.killFeed || [],
-        killMatrix: gameEntry.killMatrix || summary.killMatrix || {},
-        damageBreakdown: summary.damageBreakdown || [],
-        timeline: summary.timeline || [],
-        chatLog: summary.chatLog || [],
-        totalKills: summary.totalKills || 0,
-        totalDeaths: summary.totalDeaths || 0,
-        totalEvents: summary.totalEvents || 0,
-        parsedAt: now.toISOString(),
-        clientCount: 1 + clientGamelogs.size,
+        killFeed: events.killFeed || [],
+        killMatrix: namedKillMatrix || g.killMatrix || null,
+        timeline: events.timeline || [],
+        chatLog: events.chat || [],
+        damageBreakdown: [],
+        totalKills: enrichedPlayers.reduce((sum, p) => sum + (p.kills || 0), 0),
+        totalEvents: (events.killFeed.length || 0) + (events.chat.length || 0),
       };
-
-      const eventPath = path.join(CONFIG.eventsDir, `${gameId}.json`);
-      try {
-        fs.writeFileSync(eventPath, JSON.stringify(eventData, null, 2));
-        console.log(`   📋 Saved event data → ${gameId}.json`);
-        updateEventsIndex(eventData);
-      } catch (evErr) {
-        console.error(`   ⚠️ Event save error: ${evErr.message}`);
-      }
     }
 
-    // ── Append to games.json ──
-    if (fs.existsSync(CONFIG.gamesJsonFile)) {
-      const raw = fs.readFileSync(CONFIG.gamesJsonFile, 'utf8');
-      const data = JSON.parse(raw);
-
-      // Deduplicate: don't archive the same game twice
-      const isDuplicate = data.games.some(existing =>
-        existing.timestamp === gameEntry.timestamp &&
-        existing.gameName === gameEntry.gameName &&
-        existing.players.length === gameEntry.players.length
-      );
-
-      if (isDuplicate) {
-        console.log(`   ⏭️  Skipping duplicate archive for "${g.gameName}"`);
-        return;
-      }
-
-      data.games.unshift(gameEntry);
-      data.totalGames = data.games.length;
-      data.exportDate = now.toISOString();
-
-      // Write to temp file first, then rename for atomicity
-      const tmpFile = CONFIG.gamesJsonFile + '.tmp';
-      fs.writeFileSync(tmpFile, JSON.stringify(data));
-      fs.renameSync(tmpFile, CONFIG.gamesJsonFile);
-
-      console.log(`   📦 Archived "${g.gameName}" to games.json (${data.totalGames} total)`);
+    // ── Save to Firebase Firestore ──
+    if (firebase.isEnabled()) {
+      firebase.saveGame(gameEntry, eventData).catch(err => {
+        console.error(`   ⚠️ Firestore save failed: ${err.message}`);
+      });
+      console.log(`   🔥 Archived "${g.gameName}" to Firestore`);
     } else {
-      // Create new games.json
-      const data = {
-        exportDate: now.toISOString(),
-        totalGames: 1,
-        totalPlayers: gameEntry.players.length,
-        games: [gameEntry],
-        players: [],
-      };
-      fs.writeFileSync(CONFIG.gamesJsonFile, JSON.stringify(data));
-      console.log(`   📦 Created games.json with first archived game`);
+      console.warn(`   ⚠️ Firebase disabled, game not archived`);
     }
+
+    // Clean up in-memory events for this game
+    gameEvents.delete(g.id);
+
   } catch (err) {
     console.error(`   ❌ Archive error: ${err.message}`);
   }
@@ -1150,244 +1665,6 @@ function broadcastGameRemoval(id) {
   });
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Gamelog Watcher — tails the master's gamelog.txt in real time
-// ═══════════════════════════════════════════════════════════════
-function startGamelogWatcher() {
-  if (CONFIG.gamelogDirs.length === 0) {
-    console.log('  No gamelog directories found (set GAMELOG_DIR or create ~/.d1x-redux/)');
-    return;
-  }
-
-  for (const dir of CONFIG.gamelogDirs) {
-    const gamelogFile = path.join(dir, 'gamelog.txt');
-    console.log(`📝 Watching gamelog: ${gamelogFile}`);
-
-    // Start from end of existing file (don't replay old content)
-    if (fs.existsSync(gamelogFile)) {
-      const stat = fs.statSync(gamelogFile);
-      gamelogPos[gamelogFile] = stat.size;
-    } else {
-      gamelogPos[gamelogFile] = 0;
-    }
-
-    // Watch the directory for changes to gamelog.txt
-    try {
-      fs.watch(dir, (eventType, filename) => {
-        if (filename && filename.toLowerCase() === 'gamelog.txt') {
-          processGamelogUpdate(gamelogFile);
-        }
-      });
-    } catch (err) {
-      console.log(`     fs.watch failed for ${dir}: ${err.message}`);
-    }
-  }
-
-  // Also poll periodically (fs.watch can be unreliable on some systems)
-  setInterval(() => {
-    for (const dir of CONFIG.gamelogDirs) {
-      processGamelogUpdate(path.join(dir, 'gamelog.txt'));
-    }
-  }, CONFIG.gamelogPollInterval);
-}
-
-/**
- * Detect the local player name.
- * Priority:
- *   1. LOCAL_PLAYER env variable
- *   2. First player in the active game's player list (host is usually first)
- *   3. null (will use _local_ placeholder)
- */
-function detectLocalPlayer() {
-  if (process.env.LOCAL_PLAYER) {
-    console.log(`   👤 Local player (from env): ${process.env.LOCAL_PLAYER}`);
-    return process.env.LOCAL_PLAYER;
-  }
-
-  // Try to find from active games — the first player is typically the host
-  for (const [, g] of activeGames) {
-    if (g.confirmed && g.players && g.players.length > 0) {
-      const name = g.players[0].name;
-      if (name) {
-        console.log(`   👤 Local player (detected from game): ${name}`);
-        return name;
-      }
-    }
-  }
-
-  return null;
-}
-
-/**
- * Merge events from all client gamelogs into a unified timeline.
- * Each client's "You"/"Yourself" gets replaced with their actual name.
- * Duplicate events (same timestamp + same raw message) are deduplicated.
- */
-function getMergedGamelogSummary() {
-  // Start with local gamelog events
-  let allEvents = [...gamelogEvents];
-
-  // Add events from remote clients
-  for (const [playerName, data] of clientGamelogs) {
-    // These events already have _local_ replaced with playerName
-    allEvents.push(...data.events);
-  }
-
-  if (allEvents.length === 0) return null;
-
-  // Deduplicate: events with same timestamp + type + involved players
-  const seen = new Set();
-  const deduped = [];
-  for (const ev of allEvents) {
-    // Create a dedup key from the normalized event
-    const ts = ev.timestamp ? ev.timestamp.getTime() : 0;
-    const key = `${ts}|${ev.type}|${ev.killer || ''}|${ev.victim || ''}|${ev.player || ''}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      deduped.push(ev);
-    }
-  }
-
-  // Sort by timestamp
-  deduped.sort((a, b) => {
-    const ta = a.timestamp ? a.timestamp.getTime() : 0;
-    const tb = b.timestamp ? b.timestamp.getTime() : 0;
-    return ta - tb;
-  });
-
-  return summarize(deduped);
-}
-
-function processGamelogUpdate(gamelogFile) {
-  if (!fs.existsSync(gamelogFile)) return;
-
-  const stat = fs.statSync(gamelogFile);
-  const lastPos = gamelogPos[gamelogFile] || 0;
-
-  // File was truncated or replaced → new game started
-  if (stat.size < lastPos) {
-    console.log(`\n🔄 Gamelog reset detected (new game?) — ${gamelogFile}`);
-    gamelogPos[gamelogFile] = 0;
-    gamelogEvents = [];
-    gamelogSummary = null;
-    localPlayerName = null; // reset — new game, may be different player
-
-    // Broadcast reset to clients
-    broadcastWS({ type: 'gamelog_reset', data: { file: gamelogFile } });
-  }
-
-  const currentPos = gamelogPos[gamelogFile] || 0;
-  if (stat.size <= currentPos) return; // No new content
-
-  // Read only the new bytes
-  try {
-    const fd = fs.openSync(gamelogFile, 'r');
-    const newBytes = stat.size - currentPos;
-    const buf = Buffer.alloc(newBytes);
-    fs.readSync(fd, buf, 0, newBytes, currentPos);
-    fs.closeSync(fd);
-
-    const newContent = buf.toString('utf8');
-    gamelogPos[gamelogFile] = stat.size;
-
-    // Detect local player name if we don't have one yet
-    if (!localPlayerName) {
-      localPlayerName = detectLocalPlayer();
-    }
-
-    // Parse new content into events, replacing _local_ with actual name
-    const newEvents = parseGamelogContent(newContent, { localPlayer: localPlayerName });
-    if (newEvents.length === 0) return;
-
-    // Filter out UNKNOWN type events for cleaner output
-    const meaningfulEvents = newEvents.filter(e => e.type !== EVENT.UNKNOWN);
-    if (meaningfulEvents.length === 0) return;
-
-    gamelogEvents.push(...newEvents);
-    gamelogSummary = summarize(gamelogEvents);
-
-    // Log new events
-    for (const event of meaningfulEvents) {
-      const typeIcon = {
-        [EVENT.KILL]: '💀', [EVENT.DEATH]: '☠️',
-        [EVENT.SUICIDE]: '💥', [EVENT.JOIN]: '📥',
-        [EVENT.REJOIN]: '📥', [EVENT.DISCONNECT]: '',
-        [EVENT.REACTOR_DESTROYED]: '🔥', [EVENT.ESCAPE]: '🚀',
-        [EVENT.CHAT]: '💬', [EVENT.KILL_GOAL]: '🏆',
-        [EVENT.FLAG_CAPTURED]: '🚩',
-      }[event.type] || '';
-      console.log(`   ${typeIcon} [${event.type}] ${event.rawMessage}`);
-    }
-
-    // Broadcast each meaningful event to WebSocket clients
-    for (const event of meaningfulEvents) {
-      broadcastWS({
-        type: 'game_event',
-        data: {
-          eventType: event.type,
-          timestamp: event.timestamp,
-          rawMessage: event.rawMessage,
-          killer: event.killer,
-          victim: event.victim,
-          player: event.player,
-          method: event.method,
-          cause: event.cause,
-          message: event.message, // for chat events
-        },
-      });
-    }
-
-    // Broadcast updated summary
-    broadcastWS({
-      type: 'game_summary',
-      data: {
-        players: gamelogSummary.players,
-        killFeed: gamelogSummary.killFeed.slice(-20),
-        timeline: gamelogSummary.timeline.slice(-50),
-        chatLog: gamelogSummary.chatLog.slice(-20),
-        totalKills: gamelogSummary.totalKills,
-        totalDeaths: gamelogSummary.totalDeaths,
-        totalEvents: gamelogSummary.totalEvents,
-      },
-    });
-
-    // Merge gamelog stats into active game players
-    mergeGamelogStatsIntoActiveGames();
-
-  } catch (err) {
-    console.error(`   ❌ Gamelog read error: ${err.message}`);
-  }
-}
-
-function mergeGamelogStatsIntoActiveGames() {
-  // Use merged summary if we have remote client data, otherwise local only
-  const summary = clientGamelogs.size > 0 ? getMergedGamelogSummary() : gamelogSummary;
-  if (!summary || summary.players.length === 0) return;
-
-  // Update the working summary so writeGamelistFile uses merged data
-  if (clientGamelogs.size > 0) {
-    gamelogSummary = summary;
-  }
-
-  for (const [, g] of activeGames) {
-    if (!g.confirmed) continue;
-
-    for (const p of g.players) {
-      const logPlayer = summary.players.find(
-        lp => lp.name.toLowerCase() === p.name.toLowerCase()
-      );
-      if (logPlayer) {
-        p.kills = logPlayer.kills;
-        p.deaths = logPlayer.deaths;
-        p.suicides = logPlayer.suicides;
-      }
-    }
-  }
-
-  // Update the JSON file immediately after merging stats
-  writeGamelistFile();
-}
-
 // ── Generic WebSocket broadcast helper ──────────────────────────
 function broadcastWS(obj) {
   if (!wsClients.length) return;
@@ -1398,25 +1675,36 @@ function broadcastWS(obj) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// HTTP API Server — Gamelog Upload Endpoint
-// POST /api/gamelog { playerName: "...", content: "..." }
-// Allows remote clients to upload their gamelog perspective.
+// HTTPS API Server — Gamelog Events API
+// GET /api/status — Tracker status
+// GET /api/events/:gameId — Game events
 // ═══════════════════════════════════════════════════════════════
 function startHTTPServer() {
   const httpPort = parseInt(process.env.HTTP_PORT || '9998', 10);
-  const http = require('http');
+  const https = require('https');
+  
+  // Load SSL certificates (same as main server)
+  const certPath = path.resolve(__dirname, '../server.crt');
+  const keyPath = path.resolve(__dirname, '../server.key');
+  
+  let httpServer;
+  try {
+    const sslOptions = {
+      cert: fs.readFileSync(certPath),
+      key: fs.readFileSync(keyPath),
+    };
+    
+    httpServer = https.createServer(sslOptions, async (req, res) => {
+      // CORS headers
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  const httpServer = http.createServer((req, res) => {
-    // CORS headers
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-    if (req.method === 'OPTIONS') {
-      res.writeHead(204);
-      res.end();
-      return;
-    }
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
 
     // GET /api/status — basic status
     if (req.method === 'GET' && req.url === '/api/status') {
@@ -1424,112 +1712,90 @@ function startHTTPServer() {
       res.end(JSON.stringify({
         status: 'ok',
         activeGames: activeGames.size,
-        gamelogClients: clientGamelogs.size,
-        localPlayer: localPlayerName,
         uptime: process.uptime(),
       }));
       return;
     }
 
-    // POST /api/gamelog — upload gamelog from a remote client
-    if (req.method === 'POST' && req.url === '/api/gamelog') {
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', () => {
-        try {
-          const data = JSON.parse(body);
-          const playerName = data.playerName;
-          const content = data.content;
+    // GET /api/events/:gameId — get events for a specific game
+    if (req.method === 'GET' && req.url.startsWith('/api/events/')) {
+      // Strip query string and decode URI component
+      const urlPath = req.url.split('?')[0];
+      const gameId = decodeURIComponent(urlPath.substring(12));
+      const events = gameEvents.get(gameId);
 
-          if (!playerName || !content) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Missing playerName or content' }));
-            return;
-          }
+      console.log(`   📡 Events request for: "${gameId}" → ${events ? `${events.killFeed.length} kills, ${events.chat.length} chat` : 'no events'}`);
 
-          console.log(`\n Gamelog upload from "${playerName}" (${content.length} bytes)`);
-
-          // Parse the content, replacing "You"/"Yourself" with this player's name
-          const events = parseGamelogContent(content, { localPlayer: playerName });
-          const meaningful = events.filter(e => e.type !== EVENT.UNKNOWN);
-
-          // Store/update this client's events
-          clientGamelogs.set(playerName, {
-            events: meaningful,
-            raw: content,
-            uploadedAt: new Date().toISOString(),
-          });
-
-          console.log(`    ${meaningful.length} events parsed from ${playerName}`);
-          console.log(`    Total clients: ${clientGamelogs.size}`);
-
-          // Re-merge all gamelogs and update
-          mergeGamelogStatsIntoActiveGames();
-
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({
-            ok: true,
-            eventsReceived: meaningful.length,
-            totalClients: clientGamelogs.size + 1, // +1 for local
-          }));
-
-        } catch (err) {
-          console.error(`   ❌ Gamelog upload error: ${err.message}`);
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: err.message }));
-        }
-      });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      if (events) {
+        res.end(JSON.stringify({
+          gameId,
+          killFeed: events.killFeed || [],
+          chat: events.chat || [],
+          timeline: events.timeline || [],
+          startTime: events.startTime,
+        }));
+      } else {
+        res.end(JSON.stringify({
+          gameId,
+          killFeed: [],
+          chat: [],
+          timeline: [],
+          startTime: null,
+        }));
+      }
       return;
     }
 
-    // POST /api/gamelog/append — append new lines (incremental upload)
-    if (req.method === 'POST' && req.url === '/api/gamelog/append') {
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', () => {
-        try {
-          const data = JSON.parse(body);
-          const playerName = data.playerName;
-          const newLines = data.content;
+    // GET /api/firebase/games — query games from Firestore
+    if (req.method === 'GET' && req.url.startsWith('/api/firebase/games')) {
+      const urlParts = new URL(req.url, `https://${req.headers.host}`);
+      const limit = Math.min(parseInt(urlParts.searchParams.get('limit')) || 50, 200);
+      const after = urlParts.searchParams.get('after') || undefined;
+      const mode = urlParts.searchParams.get('mode') || undefined;
 
-          if (!playerName || !newLines) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Missing playerName or content' }));
-            return;
-          }
+      try {
+        const result = await firebase.queryGames({ limit, after, mode });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
 
-          // Parse only the new lines
-          const newEvents = parseGamelogContent(newLines, { localPlayer: playerName });
-          const meaningful = newEvents.filter(e => e.type !== EVENT.UNKNOWN);
+    // GET /api/firebase/game/:id — get single game from Firestore
+    if (req.method === 'GET' && req.url.startsWith('/api/firebase/game/')) {
+      const urlPath = req.url.split('?')[0];
+      const gameId = decodeURIComponent(urlPath.substring(19));
 
-          // Append to existing client data
-          const existing = clientGamelogs.get(playerName);
-          if (existing) {
-            existing.events.push(...meaningful);
-            existing.raw += '\n' + newLines;
-            existing.uploadedAt = new Date().toISOString();
-          } else {
-            clientGamelogs.set(playerName, {
-              events: meaningful,
-              raw: newLines,
-              uploadedAt: new Date().toISOString(),
-            });
-          }
-
-          mergeGamelogStatsIntoActiveGames();
-
+      try {
+        const game = await firebase.getGame(gameId);
+        if (game) {
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({
-            ok: true,
-            newEvents: meaningful.length,
-            totalEvents: (existing ? existing.events.length : meaningful.length),
-          }));
-
-        } catch (err) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: err.message }));
+          res.end(JSON.stringify({ game }));
+        } else {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Game not found in Firestore' }));
         }
-      });
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    // GET /api/firebase/count — game count from Firestore
+    if (req.method === 'GET' && req.url === '/api/firebase/count') {
+      try {
+        const count = await firebase.getGameCount();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ count }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
       return;
     }
 
@@ -1538,34 +1804,36 @@ function startHTTPServer() {
     res.end(JSON.stringify({ error: 'Not found' }));
   });
 
-  httpServer.listen(httpPort, () => {
-    console.log(`🌐 HTTP API server on port ${httpPort}`);
-    console.log(`   POST /api/gamelog — Upload full gamelog`);
-    console.log(`   POST /api/gamelog/append — Append new lines`);
-    console.log(`   GET  /api/status — Tracker status`);
+  httpServer.listen(httpPort, '0.0.0.0', () => {
+    console.log(`\u{1F512} HTTPS API server on port ${httpPort}`);
+    console.log(`   GET  /api/status \u2014 Tracker status`);
+    console.log(`   GET  /api/events/:gameId \u2014 Game events`);
+    console.log(`   GET  /api/firebase/games \u2014 Query Firestore games`);
+    console.log(`   GET  /api/firebase/game/:id \u2014 Single Firestore game`);
   });
+  
+  } catch (err) {
+    console.error(`⚠️  HTTPS API failed: ${err.message}`);
+    console.log('   Make sure server.crt and server.key exist');
+  }
 }
 
 // ── Main ────────────────────────────────────────────────────────
 function main() {
   console.log('╔═══════════════════════════════════════════════════════════╗');
   console.log('║   DXX-Redux/Rebirth Game Tracker v3.1                     ║');
-  console.log('║   PyTracker-compatible + Gamelog Events                    ║');
+  console.log('║   PyTracker-compatible UDP Protocol                      ║');
   console.log('╚═══════════════════════════════════════════════════════════╝');
 
   ensureEventsDir();
+  firebase.init();
   startUDPServer();
   startWebSocketServer();
   startHTTPServer();
-  startGamelogWatcher();
   setInterval(cleanupDeadGames, CONFIG.cleanupInterval);
   setInterval(pollActiveGames, CONFIG.pollInterval);
   writeGamelistFile(); // Write initial (empty) file immediately
 
-  if (CONFIG.gamelogDirs.length) {
-    console.log(`\n📝 Gamelog directories:`);
-    CONFIG.gamelogDirs.forEach(d => console.log(`   ${d}/gamelog.txt`));
-  }
   console.log(`\n Steam launch options for DXX-Redux:`);
   console.log(`   -tracker_hostaddr <YOUR_IP> -tracker_hostport ${CONFIG.udpPort}`);
   console.log(`\n Active games: ${activeGames.size}`);  

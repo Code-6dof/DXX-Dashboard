@@ -452,6 +452,87 @@
   border: 1px solid var(--border);
 }
 
+/* ── Load All Button ── */
+.btn-load-all {
+  padding: 0.6rem 1.2rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  background: linear-gradient(135deg, var(--accent) 0%, #d500f9 100%);
+  color: white;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 20px rgba(213, 0, 249, 0.3);
+}
+
+.btn-load-all:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 30px rgba(213, 0, 249, 0.5);
+}
+
+/* ── Confirmation Modal ── */
+.confirm-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.confirm-modal.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(5, 8, 15, 0.85);
+  backdrop-filter: blur(6px);
+}
+
+.modal-dialog {
+  position: relative;
+  width: 90%;
+  max-width: 500px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  box-shadow: 0 16px 64px rgba(0, 0, 0, 0.6), 0 0 40px rgba(213, 0, 249, 0.2);
+}
+
+.modal-content {
+  padding: 2rem;
+}
+
+.modal-content h3 {
+  margin: 0 0 1rem;
+  font-size: 1.5rem;
+  color: var(--accent);
+}
+
+.modal-content p {
+  margin: 0.75rem 0;
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.modal-content strong {
+  color: var(--accent);
+}
+
+.modal-actions {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1.5rem;
+  justify-content: flex-end;
+}
+
 /* ── Responsive ── */
 @media (max-width: 900px) {
   .active-games-list {

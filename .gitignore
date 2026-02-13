@@ -4,8 +4,26 @@ serviceAccountKey.json
 *.log
 functions/node_modules/
 .firebase/
-live-games.json
 scraper/udp-tracker.js.bak
-cloudflared-linux-amd64
 *.tmp
+
+# ── Personal / Server-specific ──
+deploy.sh
+serve.py
+start-services.sh
+stop-services.sh
+start-tracker.sh
+server.crt
+server.key
+*.pem
+*.deb
+cloudflared*
+
+# ── VS Code local settings ──
+.vscode/
+
+# ── Live/generated game data ──
 public/data/live-games.json
+public/data/games.json
+public/data/events/
+dxx-dashboard-firebase-adminsdk-*.json

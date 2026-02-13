@@ -5,22 +5,20 @@
 const DXXFilters = (() => {
   let allGames = [];
   let allPlayers = [];
+  let metadataCache = null; // Store metadata for year range
 
-  function setData(games, players) {
+  function setData(games, players, metadata) {
     allGames = games;
     allPlayers = players;
+    if (metadata) metadataCache = metadata;
     populateDropdowns();
   }
 
   function populateDropdowns() {
-    const yearSet = new Set();
     const mapSet = new Set();
 
+    // Collect maps from loaded games
     allGames.forEach((g) => {
-      if (g.timestamp && g.timestamp.length >= 4) {
-        const y = g.timestamp.slice(0, 4);
-        if (y !== "1970") yearSet.add(y);
-      }
       if (g.map && g.map !== "Unknown") mapSet.add(g.map);
     });
 
@@ -28,14 +26,33 @@ const DXXFilters = (() => {
     const mapSel = document.getElementById("mapFilter");
     const monthSel = document.getElementById("monthFilter");
 
-    // Year
+    // Year - use metadata date range if available, otherwise fallback to loaded games
     yearSel.innerHTML = '<option value="">All Years</option>';
-    [...yearSet]
-      .sort()
-      .reverse()
-      .forEach((y) => {
-        yearSel.innerHTML += `<option value="${y}">${y}</option>`;
+    let years = [];
+    
+    if (metadataCache && metadataCache.oldestGame && metadataCache.newestGame) {
+      // Extract year range from metadata
+      const oldestYear = parseInt(metadataCache.oldestGame.slice(0, 4));
+      const newestYear = parseInt(metadataCache.newestGame.slice(0, 4));
+      // Generate all years in range
+      for (let y = newestYear; y >= oldestYear; y--) {
+        years.push(y.toString());
+      }
+    } else {
+      // Fallback: use years from loaded games
+      const yearSet = new Set();
+      allGames.forEach((g) => {
+        if (g.timestamp && g.timestamp.length >= 4) {
+          const y = g.timestamp.slice(0, 4);
+          if (y !== "1970") yearSet.add(y);
+        }
       });
+      years = [...yearSet].sort().reverse();
+    }
+    
+    years.forEach((y) => {
+      yearSel.innerHTML += `<option value="${y}">${y}</option>`;
+    });
 
     // Map
     mapSel.innerHTML = '<option value="">All Maps</option>';

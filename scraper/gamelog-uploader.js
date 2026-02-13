@@ -22,7 +22,7 @@ const os = require('os');
 
 // Configuration
 const CONFIG = {
-  serverUrl: 'http://192.210.140.94:9998',
+  serverUrl: process.env.DXX_SERVER_URL || 'http://localhost:9998',
   gamelogPath: null,
   checkInterval: 1000,
   uploadEndpoint: '/api/gamelog/append',
@@ -35,6 +35,10 @@ let lastPosition = 0;
 let currentGameId = null;
 let uploadQueue = [];
 let isUploading = false;
+let heartbeatInterval = null;
+let gameCheckInterval = null;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 10;
 
 /**
  * Parse command line arguments
@@ -62,15 +66,89 @@ function parseArguments() {
         console.log('Usage: node gamelog-uploader.js [options]');
         console.log('');
         console.log('Options:');
-        console.log('  --server URL     Server URL (default: http://192.210.140.94:9998)');
+        console.log('  --server URL     Server URL (default: $DXX_SERVER_URL or http://localhost:9998)');
         console.log('  --gamelog PATH   Path to gamelog.txt (auto-detected if not specified)');
-        console.log('  --player NAME    Your player name (auto-detected if not specified)');
+        console.log('  --player NAME    Your pilot name (auto-detected if not specified)');
         console.log('  --interval MS    Check interval in milliseconds (default: 1000)');
         console.log('  --help           Show this help message');
+        console.log('');
+        console.log('Pilot Name Detection (in priority order):');
+        console.log('  1. PILOT_NAME environment variable');
+        console.log('  2. --player command line argument');
+        console.log('  3. LastPlayer field in descent.cfg');
+        console.log('  4. Auto-detect from gamelog join messages');
+        console.log('  5. Hostname (fallback - not recommended)');
+        console.log('');
+        console.log('Example:');
+        console.log('  export PILOT_NAME="YourCallsign"');
+        console.log('  node gamelog-uploader.js --server http://example.com:9998');
         process.exit(0);
         break;
     }
   }
+}
+
+/**
+ * Check if DXX game process is running
+ */
+function isGameRunning() {
+  if (process.platform === 'win32') {
+    try {
+      const { execSync } = require('child_process');
+      const result = execSync('tasklist', { encoding: 'utf8' });
+      return result.includes('d1x-redux') || result.includes('d1x-rebirth') || result.includes('d2x-redux') || result.includes('d2x-rebirth');
+    } catch {
+      return true; // Assume running if check fails
+    }
+  } else {
+    try {
+      const { execSync } = require('child_process');
+      const result = execSync('ps aux', { encoding: 'utf8' });
+      return result.includes('d1x-redux') || result.includes('d1x-rebirth') || result.includes('d2x-redux') || result.includes('d2x-rebirth');
+    } catch {
+      return true; // Assume running if check fails
+    }
+  }
+}
+
+/**
+ * Start game process monitoring
+ */
+function startGameMonitoring() {
+  gameCheckInterval = setInterval(() => {
+    if (!isGameRunning()) {
+      console.log('Game process not detected - shutting down uploader');
+      cleanup();
+      process.exit(0);
+    }
+  }, 5000); // Check every 5 seconds
+}
+
+/**
+ * Start server heartbeat
+ */
+function startHeartbeat() {
+  heartbeatInterval = setInterval(async () => {
+    try {
+      await checkServerConnection();
+      reconnectAttempts = 0;
+    } catch (err) {
+      reconnectAttempts++;
+      if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        console.error(`Server unreachable after ${MAX_RECONNECT_ATTEMPTS} attempts - giving up`);
+        cleanup();
+        process.exit(1);
+      }
+    }
+  }, 30000); // Check every 30 seconds
+}
+
+/**
+ * Cleanup intervals
+ */
+function cleanup() {
+  if (heartbeatInterval) clearInterval(heartbeatInterval);
+  if (gameCheckInterval) clearInterval(gameCheckInterval);
 }
 
 /**
@@ -93,12 +171,23 @@ function detectGamelogPath() {
   } else if (platform === 'darwin') {
     // macOS paths
     possiblePaths.push(
+      path.join(home, 'Library', 'Application Support', 'D1X-Redux', 'gamelog.txt'),
+      path.join(home, '.d1x-redux', 'gamelog.txt'),
+      path.join(home, '.d1x-rebirth', 'gamelog.txt'),
+      path.join(home, 'Library', 'Application Support', 'D2X-Redux', 'gamelog.txt'),
+      path.join(home, '.d2x-redux', 'gamelog.txt'),
       path.join(home, 'Library', 'Application Support', 'D2X-Rebirth', 'gamelog.txt'),
       path.join(home, '.d2x-rebirth', 'gamelog.txt')
     );
   } else {
     // Linux/Unix paths
     possiblePaths.push(
+      path.join(home, '.d1x-redux', 'gamelog.txt'),
+      path.join(home, '.local', 'share', 'd1x-redux', 'gamelog.txt'),
+      path.join(home, '.d1x-rebirth', 'gamelog.txt'),
+      path.join(home, '.local', 'share', 'd1x-rebirth', 'gamelog.txt'),
+      path.join(home, '.d2x-redux', 'gamelog.txt'),
+      path.join(home, '.local', 'share', 'd2x-redux', 'gamelog.txt'),
       path.join(home, '.d2x-rebirth', 'gamelog.txt'),
       path.join(home, '.local', 'share', 'd2x-rebirth', 'gamelog.txt')
     );
@@ -228,21 +317,73 @@ async function processUploadQueue() {
 /**
  * Detect player name from gamelog or config
  */
-function detectPlayerName(content) {
-  // Try to extract from gamelog lines like:
-  // "You were killed by PlayerName"
-  // "You killed PlayerName"
-  // "PlayerName [You]"
+function detectPlayerName(content, gamelogPath) {
+  // First priority: environment variable
+  if (process.env.PILOT_NAME) {
+    console.log(`[${new Date().toISOString()}] Using pilot name from PILOT_NAME environment variable: ${process.env.PILOT_NAME}`);
+    return process.env.PILOT_NAME;
+  }
+  
+  // Second priority: try to read from descent.cfg (LastPlayer field)
+  try {
+    const configPath = path.join(path.dirname(gamelogPath), 'descent.cfg');
+    if (fs.existsSync(configPath)) {
+      const configContent = fs.readFileSync(configPath, 'utf8');
+      const lastPlayerMatch = configContent.match(/^LastPlayer=(.+)$/m);
+      if (lastPlayerMatch && lastPlayerMatch[1].trim()) {
+        console.log(`[${new Date().toISOString()}] Detected pilot name from descent.cfg: ${lastPlayerMatch[1].trim()}`);
+        return lastPlayerMatch[1].trim();
+      }
+    }
+  } catch (err) {
+    console.error(`[${new Date().toISOString()}] Could not read descent.cfg: ${err.message}`);
+  }
+  
+  // Try to extract from gamelog lines
+  // DXX-Redux gamelog format uses "You" for local player actions
+  // and join messages like: "'PlayerName' is joining the game"
   const lines = content.split('\n');
   
+  const joinedPlayers = [];
+  let hasYouActions = false;
+  
   for (const line of lines) {
-    const youMatch = line.match(/\[You\].*?playerName=([^\s,\]]+)/);
-    if (youMatch) {
-      return youMatch[1];
+    // Track join messages
+    const joinMatch = line.match(/^(?:\w+ )?'?(.+?)'? is (?:re)?joining the game\.?$/i);
+    if (joinMatch) {
+      const playerName = joinMatch[1].trim();
+      if (!joinedPlayers.includes(playerName)) {
+        joinedPlayers.push(playerName);
+      }
+    }
+    
+    // Check if we have "You" actions
+    if (line.match(/^You (killed|were killed|destroyed|reached|have|are)/i)) {
+      hasYouActions = true;
     }
   }
   
-  // Default to hostname if can't detect
+  // If we only see one player join and there are "You" actions, that's likely us
+  if (joinedPlayers.length === 1 && hasYouActions) {
+    console.log(`[${new Date().toISOString()}] Detected pilot name from gamelog: ${joinedPlayers[0]}`);
+    return joinedPlayers[0];
+  }
+  
+  // Last resort: hostname (with warning)
+  console.warn('═══════════════════════════════════════════════════');
+  console.warn('⚠️  WARNING: Could not detect pilot name!');
+  console.warn('═══════════════════════════════════════════════════');
+  console.warn('');
+  console.warn('Please set your pilot name using one of these methods:');
+  console.warn('  1. Set PILOT_NAME environment variable:');
+  console.warn('     export PILOT_NAME="YourPilotName"');
+  console.warn('  2. Use --player argument:');
+  console.warn('     node gamelog-uploader.js --player "YourPilotName"');
+  console.warn('  3. Edit your descent.cfg file');
+  console.warn('');
+  console.warn('Using hostname as fallback - THIS MAY NOT BE YOUR PILOT NAME!');
+  console.warn('═══════════════════════════════════════════════════');
+  console.warn('');
   return os.hostname().replace(/[^a-zA-Z0-9-]/g, '');
 }
 
@@ -283,7 +424,7 @@ function readNewLines() {
     
     // Detect player name if not set
     if (!CONFIG.playerName) {
-      CONFIG.playerName = detectPlayerName(content);
+      CONFIG.playerName = detectPlayerName(content, CONFIG.gamelogPath);
       console.log(`[${new Date().toISOString()}] Detected player name: ${CONFIG.playerName}`);
     }
     
@@ -299,7 +440,7 @@ function readNewLines() {
     
   } catch (err) {
     if (err.code === 'ENOENT') {
-      console.error(`[${new Date().toISOString()}] Gamelog file not found - waiting for it to be created...`);
+      // console.error(`[${new Date().toISOString()}] Gamelog file not found - waiting for it to be created...`);
       lastPosition = 0;
       currentGameId = null;
     } else {
@@ -309,7 +450,7 @@ function readNewLines() {
 }
 
 /**
- * Main entry point
+ * Main function
  */
 async function main() {
   console.log('DXX-Redux Gamelog Uploader');
@@ -362,6 +503,10 @@ async function main() {
   // Start monitoring
   setInterval(readNewLines, CONFIG.checkInterval);
   
+  // Start heartbeat and game monitoring
+  startHeartbeat();
+  startGameMonitoring();
+  
   // Initial read to catch up with existing content
   readNewLines();
 }
@@ -375,10 +520,12 @@ process.on('SIGINT', () => {
     console.log(`WARNING: ${uploadQueue.length} batches still in upload queue`);
   }
   
+  cleanup();
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
+  cleanup();
   process.exit(0);
 });
 
