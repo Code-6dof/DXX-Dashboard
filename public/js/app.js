@@ -921,6 +921,9 @@
       document.getElementById('clearFilters').style.display = 'inline-block';
       document.getElementById('toggleCharts').style.display = 'inline-block';
       
+      // Show mode tabs now that data is loaded
+      document.getElementById('modeTabs').style.display = 'flex';
+      
       // Render the data
       switchView("all");
       
