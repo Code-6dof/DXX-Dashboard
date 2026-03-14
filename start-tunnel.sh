@@ -9,7 +9,7 @@ TUNNEL_CONFIG="/home/deck/.cloudflared/config.yml"
 
 echo "=== DXX Dashboard Startup ==="
 
-NODE="/home/deck/.local/bin/node"
+NODE="/home/deck/.var/app/com.visualstudio.code/config/nvm/versions/node/v24.14.0/bin/node"
 
 # --- Kill any existing instances ---
 pkill -f "serve.py" 2>/dev/null && echo "Stopped old serve.py" || true
