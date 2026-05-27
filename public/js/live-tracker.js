@@ -212,10 +212,16 @@
     if (footer) {
       const kp = footer.querySelector('.kill-feed-preview');
       if (kp) {
-        const lastKill = game.killFeed && game.killFeed.length > 0
-          ? game.killFeed[game.killFeed.length - 1].message || 'No kills yet'
-          : 'Game in progress';
-        kp.textContent = lastKill;
+        const ev = game.killFeed && game.killFeed.length > 0 ? game.killFeed[0] : null;
+        kp.textContent = ev
+          ? (ev.killer === ev.killed ? `${ev.killed} died (${ev.weapon || '?'})` : `${ev.killer} → ${ev.killed} (${ev.weapon || '?'})`)
+          : 'No kills yet';
+      }
+      const cp = footer.querySelector('.chat-preview');
+      if (cp) {
+        const lastChat = game.chat && game.chat.length > 0 ? game.chat[game.chat.length - 1] : null;
+        cp.textContent = lastChat ? `${lastChat.from}: ${lastChat.message}` : '';
+        cp.style.display = lastChat ? '' : 'none';
       }
       const summary = footer.querySelector('.game-stats-summary');
       if (summary) {
@@ -242,9 +248,13 @@
           </div>`).join('')
       : '<div class="player-row"><span class="player-name">Waiting for players…</span></div>';
 
-    const lastKill = game.killFeed && game.killFeed.length > 0
-      ? game.killFeed[game.killFeed.length - 1].message || 'No kills yet'
-      : 'Game in progress';
+    const latestKill = game.killFeed && game.killFeed.length > 0 ? game.killFeed[0] : null;
+    const lastKill = latestKill
+      ? (latestKill.killer === latestKill.killed
+          ? `${latestKill.killed} died (${latestKill.weapon || '?'})`
+          : `${latestKill.killer} → ${latestKill.killed} (${latestKill.weapon || '?'})`)
+      : 'No kills yet';
+    const lastChat = game.chat && game.chat.length > 0 ? game.chat[game.chat.length - 1] : null;
 
     const gameName = game.gameName || game.mission || 'Unknown Map';
     const mode = game.gameMode || 'Anarchy';
@@ -268,6 +278,7 @@
         </div>
         <div class="game-card-footer">
           <span class="kill-feed-preview">${esc(lastKill)}</span>
+          ${lastChat ? `<span class="chat-preview" style="font-size:0.8rem;color:var(--text-dim);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(lastChat.from + ': ' + lastChat.message)}</span>` : '<span class="chat-preview" style="display:none"></span>'}
           <span class="game-stats-summary">
             <span>${game.totalKills || 0} kills</span>
             ${game.totalDeaths ? `<span>${game.totalDeaths} deaths</span>` : ''}
