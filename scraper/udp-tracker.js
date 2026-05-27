@@ -134,74 +134,61 @@ function getWeaponName(weaponType, weaponId) {
   return WEAPON_NAMES[weaponId] || `Weapon ${weaponId}`;
 }
 
-// ── Game Engine Message Types (from multi.h) ────
+// ── Game Engine Message Types (from multi.h, for_each_multiplayer_command macro) ────
+// Values verified against DXX-Redux source — only the ones the tracker acts on are noted.
 const MULTI = {
-  POSITION: 0,
-  REAPPEAR: 1,
-  FIRE: 2,
-  KILL: 3,
-  REMOVE_OBJECT: 4,
-  PLAYER_EXPLODE: 5,
-  MESSAGE: 6,
-  QUIT: 7,
-  PLAY_SOUND: 8,
-  BEGIN_SYNC: 9,
-  CONTROLCEN: 10,
-  CLAIM_ROBOT: 11,
-  END_SYNC: 12,
-  CLOAK: 13,
-  ENDLEVEL_START: 14,
-  DOOR_OPEN: 15,
-  CREATE_EXPLOSION: 16,
-  CONTROLCEN_FIRE: 17,
-  PLAYER_DROP: 18,
-  CREATE_POWERUP: 19,
-  CONSISTENCY: 20,
-  DECLOAK: 21,
-  MENU_CHOICE: 22,
-  ROBOT_POSITION: 23,
-  ROBOT_EXPLODE: 24,
-  ROBOT_RELEASE: 25,
-  ROBOT_FIRE: 26,
-  SCORE: 27,
-  CREATE_ROBOT: 28,
-  TRIGGER: 29,
-  BOSS_ACTIONS: 30,
-  CREATE_ROBOT_POWERUPS: 31,
-  HOSTAGE_DOOR: 32,
-  SAVE_GAME: 33,
-  RESTORE_GAME: 34,
-  REQ_PLAYER: 35,
-  DO_BOUNTY: 36,
-  TYPING_STATE: 37,
-  GMODE_UPDATE: 38,
-  KILL_GOAL_COUNTS: 39,
-  SEISMIC: 40,
-  LIGHT: 41,
-  START_TRIGGER: 42,
-  FLAGS: 43,
-  DROP_BLOBS: 44,
-  POWERUP_UPDATE: 45,
-  ACTIVE_DOOR: 46,
-  SOUND_FUNCTION: 47,
-  CAPTURE_BONUS: 48,
-  GOT_FLAG: 49,
-  DROP_FLAG: 50,
-  ROBOT_CONTROLS: 51,
-  FINISH_GAME: 52,
-  RANK: 53,
-  MODEM_PING: 54,
-  MODEM_PING_RETURN: 55,
-  ORB_BONUS: 56,
-  GOT_ORB: 57,
-  DROP_ORB: 58,
-  PLAY_BY_PLAY: 59,
-  OBS_UPDATE: 60,
-  OBS_MESSAGE: 61,
-  SHIP_STATUS: 62,
-  MARKER: 63,
-  TURKEY_TARGET: 64,
-  TURKEY_TIME_SYNC: 65,
+  POSITION:              0,
+  REAPPEAR:              1,
+  FIRE:                  2,
+  KILL:                  3,
+  REMOVE_OBJECT:         4,
+  MESSAGE:               5,  // 37 bytes: [type][player_num][text×35]
+  OBS_MESSAGE:           6,  // 47 bytes: [type][player_id=7][text×45] pre-formatted "callsign: msg"
+  QUIT:                  7,
+  PLAY_SOUND:            8,
+  CONTROLCEN:            9,
+  ROBOT_CLAIM:           10,
+  END_SYNC:              11,
+  CLOAK:                 12,
+  INVULN:                13,
+  ENDLEVEL_START:        14,
+  CREATE_EXPLOSION:      15,
+  CONTROLCEN_FIRE:       16,
+  CREATE_POWERUP:        17,
+  DECLOAK:               18,
+  DEINVULN:              19,
+  MENU_CHOICE:           20,
+  ROBOT_POSITION:        21,
+  PLAYER_EXPLODE:        22,
+  BEGIN_SYNC:            23,
+  DOOR_OPEN:             24,
+  PLAYER_DROP:           25,
+  ROBOT_EXPLODE:         26,
+  ROBOT_RELEASE:         27,
+  ROBOT_FIRE:            28,
+  SCORE:                 29,
+  CREATE_ROBOT:          30,
+  TRIGGER:               31,
+  BOSS_ACTIONS:          32,
+  CREATE_ROBOT_POWERUPS: 33,
+  HOSTAGE_DOOR:          34,
+  SAVE_GAME:             35,
+  RESTORE_GAME:          36,
+  HEARTBEAT:             37,
+  KILLGOALS:             38,
+  POWCAP_UPDATE:         39,
+  DO_BOUNTY:             40,
+  TYPING_STATE:          41,
+  GMODE_UPDATE:          42,
+  KILL_HOST:             43, // 7 bytes: [type][killed_pnum][killer_objnum int16LE][killer_net][team_vector][bounty_target]
+  KILL_CLIENT:           44,
+  RANK:                  45,
+  RESPAWN_ROBOT:         46,
+  OBS_UPDATE:            47,
+  DAMAGE:                48,
+  REPAIR:                49,
+  SHIP_STATUS:           50,
+  CREATE_EXPLOSION2:     51,
 };
 
 // ── State ───────────────────────────────────────────────────────
@@ -406,16 +393,18 @@ function walkMDATAPayload(payload, senderNum, game, events, gameTime) {
 
       if (type === 43) {
         // MULTI_KILL_HOST — 7 bytes
-        // [43][killed_pnum][objnum_lo][objnum_hi][killer_net][team_vector][bounty_target]
+        // [43][killed_pnum][killer_objnum int16LE][killer_net][team_vector][bounty_target]
+        // killer_objnum == -1 means environment kill or suicide
         if (payload.length - i < 7) break;
-        const killedPnum  = payload[i + 1];
-        // objnum_lo/hi are a 16-bit object number (not directly a player number)
-        const killerNet   = payload[i + 4]; // network player number of killer
+        const killedPnum   = payload[i + 1];
+        const killerObjnum = payload.readInt16LE(i + 2); // -1 = env kill / suicide
+        const killerNet    = payload[i + 4]; // player slot 0–7
         i += 7;
 
         const killerName = getPlayerName(killerNet);
         const killedName = getPlayerName(killedPnum);
-        const isSuicide  = killerNet === killedPnum;
+        // Suicide: same slot, or no distinct killer object (env/self)
+        const isSuicide  = killerObjnum === -1 || killerNet === killedPnum;
 
         const killEvent = {
           type: 'kill',
@@ -474,27 +463,31 @@ function walkMDATAPayload(payload, senderNum, game, events, gameTime) {
 
       } else if (type === 6) {
         // MULTI_OBS_MESSAGE — 47 bytes
-        // [6][observer_id][text 45 bytes, null-terminated]
+        // [6][player_id=7 (OBSERVER_PLAYER_ID)][text 45 bytes, null-terminated]
+        // text is pre-formatted as "callsign: message" — no further parsing needed
         if (payload.length - i < 47) break;
-        const observerId = payload[i + 1];
-        const text = payload.slice(i + 2, i + 47).toString('ascii').replace(/\0/g, '').trim();
+        const rawText = payload.slice(i + 2, i + 47).toString('ascii').replace(/\0/g, '').trim();
         i += 47;
 
-        if (text.length > 0) {
+        if (rawText.length > 0) {
+          // Split pre-formatted "callsign: message" for clean display
+          const colonIdx = rawText.indexOf(': ');
+          const from    = colonIdx > 0 ? rawText.slice(0, colonIdx) : 'Observer';
+          const message = colonIdx > 0 ? rawText.slice(colonIdx + 2) : rawText;
+
           const chatEvent = {
             type: 'chat',
             time: gameTime,
             timestamp,
-            from: `Observer ${observerId}`,
-            fromNum: observerId,
-            message: text,
+            from,
+            message,
             isObserver: true,
           };
           events.chat.push(chatEvent);
           events.timeline.push(chatEvent);
           if (events.chat.length > 200) events.chat.shift();
           if (events.timeline.length > 500) events.timeline.shift();
-          console.log(`   💬 Observer ${observerId}: ${text}`);
+          console.log(`   💬 Observer ${from}: ${message}`);
         }
 
       } else {
@@ -931,19 +924,8 @@ function parseGameInfoFull(packet, g) {
         console.log(`   📊 Kill matrix: ${players.map((p, i) => `${p.name}:${playerKills[i]}k/${killed[i]}d`).join(', ')}`);
       }
     } else {
-      // Fallback: merge gamelog stats if kill matrix not available
-      if (gamelogSummary && gamelogSummary.players.length > 0) {
-        for (const p of players) {
-          const logPlayer = gamelogSummary.players.find(
-            lp => lp.name.toLowerCase() === p.name.toLowerCase()
-          );
-          if (logPlayer) {
-            p.kills = logPlayer.kills;
-            p.deaths = logPlayer.deaths;
-            p.suicides = logPlayer.suicides;
-          }
-        }
-      }
+      // Kill matrix not available — leave player stats at zero;
+      // MULTI_KILL_HOST events from MDATA will update them in real time.
     }
 
     // Update game entry
