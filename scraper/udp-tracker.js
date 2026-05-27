@@ -368,6 +368,10 @@ function handleMDATA(packet, rinfo, opcode) {
     // Walk the payload byte-by-byte, parsing fixed-size messages
     walkMDATAPayload(packet.slice(offset), playerNum, game, events, gameTime);
 
+    // Push updated events to the live-games file and any WS clients
+    writeGamelistFile();
+    broadcastGameUpdate(game, false);
+
   } catch (err) {
     console.error(`   MDATA parse error: ${err.message}`);
   }
@@ -1144,6 +1148,8 @@ function writeGamelistFile() {
         score: p.score || 0,
       })),
       killMatrix: g.killMatrix || null,
+      killFeed: (() => { const ev = gameEvents.get(g.id); return ev ? ev.killFeed.slice(0, 50) : []; })(),
+      chat: (() => { const ev = gameEvents.get(g.id); return ev ? ev.chat.slice(-50) : []; })(),
     });
   }
 
@@ -1406,6 +1412,7 @@ function startWebSocketServer() {
 
 function broadcastGameUpdate(g, isNew) {
   if (!wsClients.length) return;
+  const ev = gameEvents.get(g.id);
   const msg = JSON.stringify({
     type: isNew ? 'game_new' : 'game_update',
     data: {
@@ -1414,8 +1421,8 @@ function broadcastGameUpdate(g, isNew) {
       playerCount: g.playerCount, maxPlayers: g.maxPlayers,
       gameMode: g.gameMode,
       timestamp: g.timestamp, detailed: g.detailed || false,
-      totalKills: gamelogSummary ? gamelogSummary.totalKills : 0,
-      killFeed: gamelogSummary ? gamelogSummary.killFeed.slice(-10) : [],
+      killFeed: ev ? ev.killFeed.slice(0, 10) : [],
+      chat: ev ? ev.chat.slice(-10) : [],
     },
   });
   wsClients.forEach(ws => {
