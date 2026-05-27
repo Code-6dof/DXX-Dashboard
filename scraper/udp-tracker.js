@@ -10,9 +10,16 @@
  *    3  Game info full    (Game → Tracker, variable)
  *    4  Game info lite req(Tracker → Game, 11 bytes)
  *    5  Game info lite    (Game → Tracker, 73 bytes)
+ *   17  MDATA_PNORM       (Game → Tracker, variable, header=6 bytes)
+ *   18  MDATA_PNEEDACK    (Game → Tracker, variable, header=10 bytes)
  *   21  Register ACK      (Tracker → Game, 1 byte)
  *   22  Game list response(Tracker → Client, variable)
  *   99  Web UI ping       (IPC)
+ *
+ * MDATA payload message types (walked byte-by-byte):
+ *   43  MULTI_KILL_HOST   7 bytes  [type][killed_pnum][objnum_lo][objnum_hi][killer_net][team_vector][bounty_target]
+ *    5  MULTI_MESSAGE    37 bytes  [type][player_num][text 35 bytes, null-terminated]
+ *    6  MULTI_OBS_MESSAGE 47 bytes [type][observer_id][text 45 bytes, null-terminated]
  *
  * Flow:
  *   1. Game sends opcode 0 (register) to tracker
@@ -57,11 +64,9 @@ const OP = {
   REGISTER_ACK: 21,
   GAME_LIST_RESPONSE: 22,
   PDATA: 13,                // Player position data
-  MDATA_PNORM: 19,          // Multiplayer data (normal)
-  MDATA_PNEEDACK: 20,       // Multiplayer data (needs ACK)
+  MDATA_PNORM: 17,          // Multiplayer data (normal)
+  MDATA_PNEEDACK: 18,       // Multiplayer data (needs ACK)
   OBSDATA: 25,              // Observer data
-  UPID_GAMELOG_KILL: 31,    // Gamelog kill event
-  UPID_GAMELOG_CHAT: 32,    // Gamelog chat event
   WEBUI_IPC: 99,
 };
 const TRACKER_PROTOCOL_VERSION = 0;
@@ -296,8 +301,8 @@ function handlePacket(packet, rinfo) {
       // Player position data - silently ignore (high frequency)
       break;
 
-    case OP.MDATA_PNORM: // 19
-    case OP.MDATA_PNEEDACK: // 20
+    case OP.MDATA_PNORM: // 17
+    case OP.MDATA_PNEEDACK: // 18
       console.log(`   📨 MDATA (opcode ${opcode})`);
       handleMDATA(packet, rinfo, opcode);
       break;
@@ -305,16 +310,6 @@ function handlePacket(packet, rinfo) {
     case OP.OBSDATA: // 25
       console.log(`   👁️  OBSDATA`);
       handleOBSDATA(packet, rinfo);
-      break;
-
-    case OP.UPID_GAMELOG_KILL: // 31
-      console.log(`   💀 GAMELOG_KILL (${packet.length} bytes from ${rinfo.address}:${rinfo.port})`);
-      handleGamelogKill(packet, rinfo);
-      break;
-
-    case OP.UPID_GAMELOG_CHAT: // 32
-      console.log(`   💬 GAMELOG_CHAT (${packet.length} bytes from ${rinfo.address}:${rinfo.port})`);
-      handleGamelogChat(packet, rinfo);
       break;
 
     case OP.WEBUI_IPC: // 99
@@ -329,47 +324,32 @@ function handlePacket(packet, rinfo) {
 
 // ═══════════════════════════════════════════════════════════════
 // MDATA Packet Handler - Multiplayer Data
-// Format: [opcode][token:4][player_num:1][pkt_num:4?][multibuf_data...]
-// The multibuf_data contains game events (kills, chat, etc)
+// 17 (MDATA_PNORM):    [type(1)][token(4)][player_num(1)]            = 6 byte header
+// 18 (MDATA_PNEEDACK): [type(1)][token(4)][player_num(1)][pkt_num(4)]= 10 byte header
+// Remaining bytes are walked as a stream of fixed-size messages.
 // ═══════════════════════════════════════════════════════════════
 function handleMDATA(packet, rinfo, opcode) {
   try {
-    if (packet.length < 10) return;
+    const headerSize = (opcode === OP.MDATA_PNEEDACK) ? 10 : 6;
+    if (packet.length < headerSize + 1) return;
 
     let offset = 1; // Skip opcode
     const token = packet.readUInt32LE(offset); offset += 4;
     const playerNum = packet[offset]; offset += 1;
-
-    // If opcode requires ACK, skip pkt_num
-    if (opcode === OP.MDATA_PNEEDACK) {
-      offset += 4; // Skip pkt_num
-    }
+    if (opcode === OP.MDATA_PNEEDACK) offset += 4; // Skip pkt_num
 
     if (offset >= packet.length) return;
 
-    // The rest is multibuf data - first byte is message type
-    const msgType = packet[offset];
-    const multibuf = packet.slice(offset);
-
-    // Find which game this belongs to
+    // Find which game this belongs to (token match first, IP fallback)
     let game = null;
-    for (const [key, g] of activeGames.entries()) {
-      if (g.ip === rinfo.address && g.gameId === token) {
-        game = g;
-        break;
-      }
+    for (const [, g] of activeGames.entries()) {
+      if (g.ip === rinfo.address && g.gameId === token) { game = g; break; }
     }
-
     if (!game) {
-      // Try to find by IP alone for unconfirmed games
-      for (const [key, g] of activeGames.entries()) {
-        if (g.ip === rinfo.address) {
-          game = g;
-          break;
-        }
+      for (const [, g] of activeGames.entries()) {
+        if (g.ip === rinfo.address) { game = g; break; }
       }
     }
-
     if (!game) return;
 
     // Get or create event storage for this game
@@ -383,11 +363,10 @@ function handleMDATA(packet, rinfo, opcode) {
     }
 
     const events = gameEvents.get(game.id);
-    const timestamp = Date.now();
-    const gameTime = ((timestamp - events.startTime) / 1000).toFixed(1);
+    const gameTime = ((Date.now() - events.startTime) / 1000).toFixed(1);
 
-    // Parse based on message type
-    parseMULTIMessage(msgType, multibuf, playerNum, game, events, gameTime);
+    // Walk the payload byte-by-byte, parsing fixed-size messages
+    walkMDATAPayload(packet.slice(offset), playerNum, game, events, gameTime);
 
   } catch (err) {
     console.error(`   MDATA parse error: ${err.message}`);
@@ -404,337 +383,124 @@ function handleOBSDATA(packet, rinfo) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Gamelog Network Packets - Direct from Game
+// Walk the MDATA payload, parsing known fixed-size message types.
+// Stops at the first unrecognised type byte.
+//
+//  43  MULTI_KILL_HOST   7 bytes  [type][killed_pnum][objnum_lo][objnum_hi][killer_net][team_vector][bounty_target]
+//   5  MULTI_MESSAGE    37 bytes  [type][player_num][text 35 bytes, null-terminated]
+//   6  MULTI_OBS_MESSAGE 47 bytes [type][observer_id][text 45 bytes, null-terminated]
 // ═══════════════════════════════════════════════════════════════
-
-// UPID_GAMELOG_KILL (31): Kill events
-// Format: [opcode:1][timestamp:8][killer_id:1][killed_id:1][weapon_type:1][weapon_id:1] = 13 bytes
-function handleGamelogKill(packet, rinfo) {
+function walkMDATAPayload(payload, senderNum, game, events, gameTime) {
   try {
-    if (packet.length < 13) {
-      console.log(`     Invalid GAMELOG_KILL length: ${packet.length}`);
-      return;
-    }
-
-    let offset = 1; // Skip opcode
-    // fix64 timestamp (8 bytes) - game time in microseconds
-    const timestampLow = packet.readUInt32LE(offset); offset += 4;
-    const timestampHigh = packet.readUInt32LE(offset); offset += 4;
-    const gameTimeUs = timestampLow + (timestampHigh * 0x100000000);
-    const gameTime = (gameTimeUs / 1000000).toFixed(1); // Convert to seconds
-
-    const killerId = packet[offset]; offset += 1;
-    const killedId = packet[offset]; offset += 1;
-    const weaponType = packet[offset]; offset += 1;
-    const weaponId = packet[offset]; offset += 1;
-
-    console.log(`     Timestamp: ${gameTime}s, Killer: ${killerId}, Killed: ${killedId}, Weapon: ${weaponType}/${weaponId}`);
-
-    // Find the game by source IP (packets come from random port!)
-    let game = null;
-    for (const [, g] of activeGames) {
-      if (g.ip === rinfo.address) {
-        game = g;
-        console.log(`     ✅ Matched to game: ${g.gameName || g.id} (game port: ${g.port})`);
-        break;
-      }
-    }
-
-    if (!game) {
-      console.log(`     ❌ No active game found for IP ${rinfo.address}`);
-      console.log(`     Active games: ${Array.from(activeGames.values()).map(g => `${g.ip}:${g.port}`).join(', ')}`);
-      return;
-    }
-
-    // Get or create events for this game
-    if (!gameEvents.has(game.id)) {
-      gameEvents.set(game.id, {
-        killFeed: [],
-        chat: [],
-        timeline: [],
-        startTime: Date.now(),
-      });
-    }
-
-    const events = gameEvents.get(game.id);
     const players = game.players || [];
     const getPlayerName = (pnum) => getUniquePlayerName(players, pnum);
+    const timestamp = new Date().toISOString();
 
-    const killerName = getPlayerName(killerId);
-    const killedName = getPlayerName(killedId);
-    const weaponName = getWeaponName(weaponType, weaponId);
-    const isSuicide = killerId === killedId;
+    let i = 0;
+    while (i < payload.length) {
+      const type = payload[i];
 
-    const killEvent = {
-      type: 'kill',
-      time: gameTime,
-      timestamp: new Date().toISOString(),
-      killer: killerName,
-      killerNum: killerId,
-      killed: killedName,
-      killedNum: killedId,
-      weapon: weaponName,
-      weaponType,
-      weaponId,
-    };
+      if (type === 43) {
+        // MULTI_KILL_HOST — 7 bytes
+        // [43][killed_pnum][objnum_lo][objnum_hi][killer_net][team_vector][bounty_target]
+        if (payload.length - i < 7) break;
+        const killedPnum  = payload[i + 1];
+        // objnum_lo/hi are a 16-bit object number (not directly a player number)
+        const killerNet   = payload[i + 4]; // network player number of killer
+        i += 7;
 
-    events.killFeed.unshift(killEvent);
-    events.timeline.push(killEvent);
+        const killerName = getPlayerName(killerNet);
+        const killedName = getPlayerName(killedPnum);
+        const isSuicide  = killerNet === killedPnum;
 
-    if (events.killFeed.length > 100) events.killFeed.pop();
-    if (events.timeline.length > 500) events.timeline.shift();
+        const killEvent = {
+          type: 'kill',
+          time: gameTime,
+          timestamp,
+          killer: killerName,
+          killerNum: killerNet,
+          killed: killedName,
+          killedNum: killedPnum,
+          weapon: 'Unknown',
+        };
 
-    console.log(`     💀 ${killerName} ${isSuicide ? 'died' : '→ ' + killedName} (${weaponName}) @ ${gameTime}s`);
+        events.killFeed.unshift(killEvent);
+        events.timeline.push(killEvent);
+        if (events.killFeed.length > 100) events.killFeed.pop();
+        if (events.timeline.length > 500) events.timeline.shift();
 
-    // Update player stats
-    const killer = players[killerId];
-    const killed = players[killedId];
-    if (killer && killed) {
-      if (isSuicide) {
-        killer.suicides = (killer.suicides || 0) + 1;
-        killer.deaths = (killer.deaths || 0) + 1;
+        // Update player stats
+        const killer = players[killerNet];
+        const killed = players[killedPnum];
+        if (killer && killed) {
+          if (isSuicide) {
+            killer.suicides = (killer.suicides || 0) + 1;
+            killer.deaths   = (killer.deaths   || 0) + 1;
+          } else {
+            killer.kills  = (killer.kills  || 0) + 1;
+            killed.deaths = (killed.deaths || 0) + 1;
+          }
+        }
+
+        console.log(`   💀 Kill: ${killerName} ${isSuicide ? 'died' : '→ ' + killedName} @ ${gameTime}s`);
+
+      } else if (type === 5) {
+        // MULTI_MESSAGE — 37 bytes
+        // [5][player_num][text 35 bytes, null-terminated]
+        if (payload.length - i < 37) break;
+        const fromNum = payload[i + 1];
+        const text = payload.slice(i + 2, i + 37).toString('ascii').replace(/\0/g, '').trim();
+        i += 37;
+
+        if (text.length > 0) {
+          const chatEvent = {
+            type: 'chat',
+            time: gameTime,
+            timestamp,
+            from: getPlayerName(fromNum),
+            fromNum,
+            message: text,
+          };
+          events.chat.push(chatEvent);
+          events.timeline.push(chatEvent);
+          if (events.chat.length > 200) events.chat.shift();
+          if (events.timeline.length > 500) events.timeline.shift();
+          console.log(`   💬 Chat: ${getPlayerName(fromNum)}: ${text}`);
+        }
+
+      } else if (type === 6) {
+        // MULTI_OBS_MESSAGE — 47 bytes
+        // [6][observer_id][text 45 bytes, null-terminated]
+        if (payload.length - i < 47) break;
+        const observerId = payload[i + 1];
+        const text = payload.slice(i + 2, i + 47).toString('ascii').replace(/\0/g, '').trim();
+        i += 47;
+
+        if (text.length > 0) {
+          const chatEvent = {
+            type: 'chat',
+            time: gameTime,
+            timestamp,
+            from: `Observer ${observerId}`,
+            fromNum: observerId,
+            message: text,
+            isObserver: true,
+          };
+          events.chat.push(chatEvent);
+          events.timeline.push(chatEvent);
+          if (events.chat.length > 200) events.chat.shift();
+          if (events.timeline.length > 500) events.timeline.shift();
+          console.log(`   💬 Observer ${observerId}: ${text}`);
+        }
+
       } else {
-        killer.kills = (killer.kills || 0) + 1;
-        killed.deaths = (killed.deaths || 0) + 1;
-      }
-    }
-
-  } catch (err) {
-    console.error(`     GAMELOG_KILL parse error: ${err.message}`);
-  }
-}
-
-// UPID_GAMELOG_CHAT (32): Chat messages
-// Format: [opcode:1][timestamp:8][player_id:1][message:variable]
-function handleGamelogChat(packet, rinfo) {
-  try {
-    if (packet.length < 11) {
-      console.log(`     Invalid GAMELOG_CHAT length: ${packet.length}`);
-      return;
-    }
-
-    let offset = 1; // Skip opcode
-    // fix64 timestamp (8 bytes)
-    const timestampLow = packet.readUInt32LE(offset); offset += 4;
-    const timestampHigh = packet.readUInt32LE(offset); offset += 4;
-    const gameTimeUs = timestampLow + (timestampHigh * 0x100000000);
-    const gameTime = (gameTimeUs / 1000000).toFixed(1);
-
-    const playerId = packet[offset]; offset += 1;
-    const message = packet.slice(offset).toString('utf8').replace(/\0/g, '').trim();
-
-    if (!message) return;
-
-    console.log(`     Timestamp: ${gameTime}s, Player: ${playerId}, Message: "${message}"`);
-
-    // Find the game by source IP (packets come from random port!)
-    let game = null;
-    for (const [, g] of activeGames) {
-      if (g.ip === rinfo.address) {
-        game = g;
-        console.log(`     ✅ Matched to game: ${g.gameName || g.id}`);
+        // Unknown type — stop scanning
+        console.log(`   🔍 MDATA: unknown type byte ${type} at offset ${i}, stopping scan`);
         break;
       }
-    }
-
-    if (!game) {
-      console.log(`     ❌ No active game found for IP ${rinfo.address}`);
-      console.log(`     Active games: ${Array.from(activeGames.values()).map(g => `${g.ip}:${g.port}`).join(', ')}`);
-      return;
-    }
-
-    // Get or create events for this game
-    if (!gameEvents.has(game.id)) {
-      gameEvents.set(game.id, {
-        killFeed: [],
-        chat: [],
-        timeline: [],
-        startTime: Date.now(),
-      });
-    }
-
-    const events = gameEvents.get(game.id);
-    const players = game.players || [];
-    const getPlayerName = (pnum) => getUniquePlayerName(players, pnum);
-
-    const playerName = getPlayerName(playerId);
-
-    const chatEvent = {
-      type: 'chat',
-      time: gameTime,
-      timestamp: new Date().toISOString(),
-      from: playerName,
-      fromNum: playerId,
-      player: playerName,
-      message: message,
-    };
-
-    events.chat.push(chatEvent);
-    events.timeline.push(chatEvent);
-
-    if (events.chat.length > 200) events.chat.shift();
-    if (events.timeline.length > 500) events.timeline.shift();
-
-    console.log(`     💬 ${playerName}: ${message} @ ${gameTime}s`);
-
-  } catch (err) {
-    console.error(`     GAMELOG_CHAT parse error: ${err.message}`);
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Parse MULTI message types from multibuf
-// ═══════════════════════════════════════════════════════════════
-function parseMULTIMessage(msgType, buf, senderNum, game, events, gameTime) {
-  try {
-    const players = game.players || [];
-    const getPlayerName = (pnum) => getUniquePlayerName(players, pnum);
-
-    switch (msgType) {
-      case MULTI.KILL: {
-        // Format: [MULTI_KILL][killer:1][killed:1]
-        if (buf.length >= 3) {
-          const killer = buf[1];
-          const killed = buf[2];
-          const killerName = getPlayerName(killer);
-          const killedName = getPlayerName(killed);
-
-          const killEvent = {
-            type: 'kill',
-            time: gameTime,
-            timestamp,
-            killer: killerName,
-            killerNum: killer,
-            killed: killedName,
-            killedNum: killed,
-            weapon: 'Unknown',
-          };
-
-          events.killFeed.unshift(killEvent);
-          events.timeline.push(killEvent);
-
-          // Keep only last 100 kills
-          if (events.killFeed.length > 100) events.killFeed.pop();
-          if (events.timeline.length > 500) events.timeline.shift();
-
-          console.log(`   💀 Kill: ${killerName} → ${killedName} @ ${gameTime}s`);
-        }
-        break;
-      }
-
-      case MULTI.MESSAGE: {
-        // Format: [MULTI_MESSAGE][from:1][text:MAX_MESSAGE_LEN]
-        if (buf.length >= 3) {
-          const from = buf[1];
-          const text = buf.slice(2).toString('ascii').replace(/\0/g, '').trim();
-          if (text.length > 0) {
-            const chatEvent = {
-              type: 'chat',
-              time: gameTime,
-              timestamp,
-              from: getPlayerName(from),
-              fromNum: from,
-              message: text,
-            };
-
-            events.chat.push(chatEvent);
-            events.timeline.push(chatEvent);
-
-            // Keep only last 200 chat messages
-            if (events.chat.length > 200) events.chat.shift();
-            if (events.timeline.length > 500) events.timeline.shift();
-
-            console.log(`   💬 Chat: ${getPlayerName(from)}: ${text}`);
-          }
-        }
-        break;
-      }
-
-      case MULTI.OBS_MESSAGE: {
-        // Observer chat message
-        if (buf.length >= 3) {
-          const from = buf[1];
-          const text = buf.slice(2).toString('ascii').replace(/\0/g, '').trim();
-          if (text.length > 0) {
-            const chatEvent = {
-              type: 'chat',
-              time: gameTime,
-              timestamp,
-              from: 'Observer',
-              fromNum: from,
-              message: text,
-              isObserver: true,
-            };
-
-            events.chat.push(chatEvent);
-            events.timeline.push(chatEvent);
-
-            if (events.chat.length > 200) events.chat.shift();
-            if (events.timeline.length > 500) events.timeline.shift();
-
-            console.log(`   💬 Observer: ${text}`);
-          }
-        }
-        break;
-      }
-
-      case MULTI.PLAYER_EXPLODE: {
-        // Player died/exploded
-        if (buf.length >= 2) {
-          const playerNum = buf[1];
-          const playerName = getPlayerName(playerNum);
-
-          const deathEvent = {
-            type: 'death',
-            time: gameTime,
-            timestamp,
-            player: playerName,
-            playerNum,
-          };
-
-          events.timeline.push(deathEvent);
-          if (events.timeline.length > 500) events.timeline.shift();
-
-          console.log(`   💥 Death: ${playerName} @ ${gameTime}s`);
-        }
-        break;
-      }
-
-      case MULTI.QUIT: {
-        // Player quit
-        if (buf.length >= 2) {
-          const playerNum = buf[1];
-          const playerName = getPlayerName(playerNum);
-
-          const quitEvent = {
-            type: 'quit',
-            time: gameTime,
-            timestamp,
-            player: playerName,
-            playerNum,
-          };
-
-          events.timeline.push(quitEvent);
-          if (events.timeline.length > 500) events.timeline.shift();
-
-          console.log(`   🚪 Quit: ${playerName} @ ${gameTime}s`);
-        }
-        break;
-      }
-
-      // Silently ignore high-frequency packets
-      case MULTI.POSITION:
-      case MULTI.FIRE:
-      case MULTI.ROBOT_POSITION:
-        break;
-
-      default:
-        // Log unknown message types for debugging
-        // console.log(`   🔍 Unknown MULTI type: ${msgType}`);
-        break;
     }
   } catch (err) {
-    console.error(`   MULTI parse error: ${err.message}`);
+    console.error(`   MDATA walk error: ${err.message}`);
   }
 }
 
