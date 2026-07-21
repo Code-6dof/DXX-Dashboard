@@ -61,20 +61,42 @@ function init() {
  * @param {Object} gameEntry  — the game record (id, players, map, etc.)
  * @param {Object} eventData  — kill feed, chat, timeline, killMatrix
  */
+/**
+ * Flatten a 2D killMatrix array into a Firestore-safe object.
+ * { "0_0": 1, "0_1": 3, ... }
+ */
+function flattenKillMatrix(matrix) {
+  if (!matrix || !Array.isArray(matrix)) return null;
+  const flat = {};
+  matrix.forEach((row, i) => {
+    if (Array.isArray(row)) {
+      row.forEach((val, j) => { flat[`${i}_${j}`] = val || 0; });
+    }
+  });
+  return flat;
+}
+
 async function saveGame(gameEntry, eventData) {
   if (!db) return false;
 
   try {
     const docId = gameEntry.id; // e.g. "game-02-13-2026-01-27-58-code-audacity"
 
+    // Flatten any nested arrays in killMatrix — Firestore rejects them
+    const rawMatrix = eventData?.killMatrix || gameEntry.killMatrix || null;
+    const safeKillMatrix = Array.isArray(rawMatrix) ? flattenKillMatrix(rawMatrix) : rawMatrix;
+
+    // Strip nested arrays from gameEntry itself
+    const { killMatrix: _km, ...safeGameEntry } = gameEntry;
+
     const doc = {
       // ── Game metadata ──
-      ...gameEntry,
+      ...safeGameEntry,
       // ── Event data (embedded, not subcollection) ──
       killFeed: eventData?.killFeed || [],
       chatLog: eventData?.chatLog || eventData?.chat || [],
       timeline: eventData?.timeline || [],
-      killMatrix: eventData?.killMatrix || gameEntry.killMatrix || null,
+      killMatrix: safeKillMatrix,
       damageBreakdown: eventData?.damageBreakdown || [],
       totalKills: eventData?.totalKills || 0,
       totalEvents: eventData?.totalEvents || 0,

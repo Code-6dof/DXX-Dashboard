@@ -17,7 +17,13 @@
  *   99  Web UI ping       (IPC)
  *
  * MDATA payload message types (walked byte-by-byte):
- *   43  MULTI_KILL_HOST   7 bytes  [type][killed_pnum][objnum_lo][objnum_hi][killer_net][team_vector][bounty_target]
+ *   48  MULTI_DAMAGE     14 bytes  [type][victim][damage int32LE][new_shields int32LE][killer_type][killer_id][damage_type][source_id]
+ *                                   killer_type: 0=OBJ_WALL, 2=OBJ_ROBOT, 4=OBJ_PLAYER, 5=OBJ_WEAPON
+ *                                   damage_type: 0=WEAPON, 1=BLAST, 2=COLLISION, 3=WALL, 4=LAVA, 5=OVERCHARGE
+ *                                   source_id:   weapon ID (254=ship_collision, 255=ship_explosion)
+ *   43  MULTI_KILL_HOST   7 bytes  [type][killed_pnum][killer_objnum int16LE][killer_net][team_vector][bounty_target]
+ *                                   killer_net=0xFF → environment/no-player kill
+ *   44  MULTI_KILL_CLIENT 5 bytes  [type][killed_pnum][killer_objnum int16LE][killer_net]
  *    5  MULTI_MESSAGE    37 bytes  [type][player_num][text 35 bytes, null-terminated]
  *    6  MULTI_OBS_MESSAGE 47 bytes [type][observer_id][text 45 bytes, null-terminated]
  *
@@ -75,63 +81,99 @@ const TRACKER_PROTOCOL_VERSION = 0;
 // Weapon ID → Name mapping (from DXX-Redux weapon.h)
 // weapon_type: 0=Weapon kill, 1=Robot kill, 2=unused, 3=Environment
 const WEAPON_NAMES = {
-  // ── Descent 1 Weapons ──
-  0: 'Laser L1',
-  1: 'Laser L2',
-  2: 'Laser L3',
-  3: 'Laser L4',
-  8: 'Concussion Missile',
-  9: 'Flare',
-  11: 'Vulcan Cannon',
-  12: 'X-Spreadfire',
-  13: 'Plasma Cannon',
-  14: 'Fusion Cannon',
-  15: 'Homing Missile',
-  16: 'Proximity Bomb',
-  17: 'Smart Missile',
-  18: 'Mega Missile',
-  19: 'Smart Blob',
-  20: 'Spreadfire',
-  21: 'Mech Missile',
-  22: 'Mech Missile 2',
-  23: 'Silent Spreadfire',
-  29: 'Robot Smart Blob',
-  
-  // ── Descent 2 Weapons ──
-  30: 'Super Laser L5',
-  31: 'Super Laser L6',
-  32: 'Gauss Cannon',
-  33: 'Helix Cannon',
-  34: 'Phoenix Cannon',
-  35: 'Omega Cannon',
-  36: 'Flash Missile',
-  37: 'Guided Missile',
-  38: 'Super Proximity Bomb',
-  39: 'Mercury Missile',
-  40: 'Earthshaker',
-  47: 'Smart Mine Blob',
-  49: 'Robot Smart Mine',
-  51: 'Designer Mine',
-  53: 'Robot Super Proximity',
-  54: 'Earthshaker Mega',
-  58: 'Robot Earthshaker',
+  // source_id values confirmed from DXX-Redux multi.c
+  // IDs 0-3 are all Laser (L1-L4) — game sends whichever level is equipped
+  0:   'Laser',
+  1:   'Laser',
+  2:   'Laser',
+  3:   'Laser',
+  8:   'Concussion Missile',
+  9:   'Flare',
+  11:  'Vulcan Cannon',
+  12:  'Spreadfire (X)',
+  13:  'Plasma Cannon',
+  14:  'Fusion Cannon',
+  15:  'Homing Missile',
+  16:  'Proximity Bomb',
+  17:  'Smart Missile',
+  18:  'Mega Missile',
+  19:  'Smart Blob',
+  20:  'Spreadfire',
+  254: 'Ship Collision',
+  255: 'Ship Explosion',
 };
 
-// Environment death subcategories (weapon_type = 3)
-const ENVIRONMENT_DEATHS = {
-  0: 'Wall Collision',
-  1: 'Lava',
-  2: 'Matcen',
+// ── Damage Type Names ────
+const DAMAGE_TYPE_NAMES = {
+  0: 'Weapon',
+  1: 'Blast',
+  2: 'Collision',
+  3: 'Wall',
+  4: 'Lava',
+  5: 'Overcharge',
+  6: 'Shield',
+  255: 'Unknown',
 };
 
-function getWeaponName(weaponType, weaponId) {
-  // weaponType: 0=Weapon, 1=Robot, 2=Collision, 3=Environment
-  if (weaponType === 1) return 'Robot';
-  if (weaponType === 2) return 'Collision';
-  if (weaponType === 3) return ENVIRONMENT_DEATHS[weaponId] || 'Environment';
-  
-  // weaponType 0 = Weapon kill
-  return WEAPON_NAMES[weaponId] || `Weapon ${weaponId}`;
+// Translate a MULTI_DAMAGE log entry or last-hit context into a human-readable weapon / cause-of-death.
+// Accepts either a single hit object {killerType, damageType, sourceId} or null.
+function describeDamage(ctx) {
+  if (!ctx) return null;
+  const { killerType, damageType, sourceId } = ctx;
+
+  // Injected pseudo-weapon IDs (not real weapon indices)
+  if (sourceId === 254) return 'Ship Collision';
+  if (sourceId === 255) return 'Ship Explosion';
+
+  switch (killerType) {
+    case 0: // OBJ_WALL — wall impact or environmental hazard
+      return damageType === 4 ? 'Lava' : 'Wall Impact';
+    case 2: // OBJ_ROBOT
+      return 'Robot';
+    case 4: // OBJ_PLAYER — weapon or collision
+    case 5: // OBJ_WEAPON — direct weapon object
+      if (damageType === 2) return 'Collision';
+      return WEAPON_NAMES[sourceId] || `Weapon #${sourceId}`;
+    default:
+      return WEAPON_NAMES[sourceId] || null;
+  }
+}
+
+// ── Initialize a fresh per-player damage log for 8 slots ────
+function initDamageLog() {
+  const log = {};
+  for (let i = 0; i < 8; i++) log[i] = [];
+  return log;
+}
+
+// ── Build killerBreakdown from a damageLog snapshot ────
+// Groups hits by killerId (null=env), sums damage, counts hits, tracks weapons.
+function buildKillerBreakdown(log, getPlayerName) {
+  const groups = {}; // key = killerId (number) or 'env'
+  for (const hit of log) {
+    if (hit.damageType === 6) continue; // shield restore — skip
+    const key = (hit.killerType === 4 && hit.killerId !== null) ? hit.killerId : 'env';
+    if (!groups[key]) {
+      groups[key] = {
+        killerSlot: key === 'env' ? null : key,
+        killerName: key === 'env' ? 'Environment' : getPlayerName(key),
+        totalDamage: 0,
+        hits: 0,
+        weapons: {},
+      };
+    }
+    const g = groups[key];
+    g.totalDamage += hit.damage;
+    g.hits        += 1;
+    const wKey = hit.sourceId;
+    if (!g.weapons[wKey]) g.weapons[wKey] = { name: WEAPON_NAMES[wKey] || `Weapon #${wKey}`, damage: 0, hits: 0 };
+    g.weapons[wKey].damage += hit.damage;
+    g.weapons[wKey].hits   += 1;
+  }
+  return Object.values(groups)
+    .map(g => ({ ...g, weapons: Object.values(g.weapons).sort((a, b) => b.damage - a.damage) }))
+    .filter(g => g.totalDamage > 0)  // drop zero-damage env/lava entries
+    .sort((a, b) => b.totalDamage - a.totalDamage);
 }
 
 // ── Game Engine Message Types (from multi.h, for_each_multiplayer_command macro) ────
@@ -223,6 +265,29 @@ function ensureEventsDir() {
   }
 }
 
+// ── Self-healing port release ─────────────────────────────────
+// Kill any process holding our ports before we try to bind.
+// This prevents the EADDRINUSE crash loop when pm2 restarts faster
+// than the OS releases the port from the previous process.
+function freePorts(callback) {
+  const { execSync } = require('child_process');
+  const ports = [CONFIG.udpPort, CONFIG.wsPort].filter(Boolean);
+  let freed = 0;
+  for (const port of ports) {
+    try {
+      // fuser -k sends SIGKILL to whatever holds the port
+      execSync(`fuser -k ${port}/tcp 2>/dev/null; fuser -k ${port}/udp 2>/dev/null`, { stdio: 'ignore' });
+      freed++;
+    } catch (e) { /* port was free, ignore */ }
+  }
+  if (freed > 0) {
+    console.log(`⚡ Released stale port holders, waiting 500ms…`);
+    setTimeout(callback, 500);
+  } else {
+    callback();
+  }
+}
+
 // ── UDP Server ──────────────────────────────────────────────────
 function startUDPServer() {
   server = dgram.createSocket('udp4');
@@ -294,6 +359,12 @@ function handlePacket(packet, rinfo) {
       handleMDATA(packet, rinfo, opcode);
       break;
 
+    case 43: // MULTI_KILL_HOST — bare sub-packet (no UPID wrapper)
+    case 48: // MULTI_DAMAGE    — bare sub-packet (no UPID wrapper)
+      console.log(`   🎯 Bare sub-packet type ${opcode} (${packet.length} bytes)`);
+      handleBareSubPacket(packet, rinfo);
+      break;
+
     case OP.OBSDATA: // 25
       console.log(`   👁️  OBSDATA`);
       handleOBSDATA(packet, rinfo);
@@ -339,6 +410,10 @@ function handleMDATA(packet, rinfo, opcode) {
     }
     if (!game) return;
 
+    // Stamp live activity — any MDATA means the game is actively running
+    game.lastActivity = Date.now();
+    game.lastSeen = Date.now();
+
     // Get or create event storage for this game
     if (!gameEvents.has(game.id)) {
       gameEvents.set(game.id, {
@@ -374,10 +449,58 @@ function handleOBSDATA(packet, rinfo) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Bare Sub-Packet Handler
+// multi_send_kill and multi_send_damage now call net_udp_send_to_all_trackers
+// directly, sending the raw sub-packet buffer with NO UPID/MDATA wrapper.
+// byte[0] is the sub-packet type (43=MULTI_KILL_HOST, 48=MULTI_DAMAGE).
+// The host machine is always the sender (slot 0) — only the host registers
+// with the tracker and knows its address.
+// ═══════════════════════════════════════════════════════════════
+function handleBareSubPacket(packet, rinfo) {
+  try {
+    // Find game by source IP — no token in bare packets
+    let game = null;
+    for (const [, g] of activeGames.entries()) {
+      if (g.ip === rinfo.address) { game = g; break; }
+    }
+    if (!game) return;
+
+    game.lastActivity = Date.now();
+    game.lastSeen     = Date.now();
+
+    if (!gameEvents.has(game.id)) {
+      gameEvents.set(game.id, {
+        killFeed:  [],
+        chat:      [],
+        timeline:  [],
+        startTime: Date.now(),
+      });
+    }
+
+    const events   = gameEvents.get(game.id);
+    const gameTime = ((Date.now() - events.startTime) / 1000).toFixed(1);
+
+    // senderNum=0: bare packets always originate from the host (slot 0).
+    // For client kills, killerNet inside MULTI_KILL_HOST carries the real slot.
+    walkMDATAPayload(packet, 0, game, events, gameTime);
+
+    writeGamelistFile();
+    broadcastGameUpdate(game, false);
+  } catch (err) {
+    console.error(`   Bare sub-packet error: ${err.message}`);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Walk the MDATA payload, parsing known fixed-size message types.
 // Stops at the first unrecognised type byte.
 //
-//  43  MULTI_KILL_HOST   7 bytes  [type][killed_pnum][objnum_lo][objnum_hi][killer_net][team_vector][bounty_target]
+//  48  MULTI_DAMAGE     14 bytes  [type][victim][damage int32LE][new_shields int32LE][killer_type][killer_id][damage_type][source_id]
+//                                  killer_type: 0=OBJ_WALL, 2=OBJ_ROBOT, 4=OBJ_PLAYER, 5=OBJ_WEAPON
+//                                  damage_type: 0=WEAPON, 1=BLAST, 2=COLLISION, 3=WALL, 4=LAVA, 5=OVERCHARGE
+//                                  source_id:   weapon ID (254=ship_collision, 255=ship_explosion)
+//  43  MULTI_KILL_HOST   7 bytes  [type][killed_pnum][killer_objnum int16LE][killer_net][team_vector][bounty_target]
+//  44  MULTI_KILL_CLIENT 5 bytes  [type][killed_pnum][killer_objnum int16LE][killer_net]
 //   5  MULTI_MESSAGE    37 bytes  [type][player_num][text 35 bytes, null-terminated]
 //   6  MULTI_OBS_MESSAGE 47 bytes [type][observer_id][text 45 bytes, null-terminated]
 // ═══════════════════════════════════════════════════════════════
@@ -391,51 +514,189 @@ function walkMDATAPayload(payload, senderNum, game, events, gameTime) {
     while (i < payload.length) {
       const type = payload[i];
 
-      if (type === 43) {
+      if (type === 48) {
+        // MULTI_DAMAGE — 14 bytes
+        // [0]=type [1]=victim [2-5]=damage int32LE (÷65536 = shield pts)
+        // [6-9]=shields_after int32LE (÷65536) [10]=killer_type [11]=killer_id
+        // [12]=damage_type [13]=source_id (weapon)
+        // killer_type: 0=OBJ_WALL, 2=OBJ_ROBOT, 4=OBJ_PLAYER, 5=OBJ_WEAPON
+        // damage_type: 0=WEAPON,1=BLAST,2=COLLISION,3=WALL,4=LAVA,5=OVERCHARGE,6=SHIELD,255=UNKNOWN
+        if (payload.length - i < 14) { i += 14; continue; }
+        const dmgVictim  = payload[i + 1];
+        const dmgAmount  = Math.round(payload.readInt32LE(i + 2) / 65536);
+        const shieldsAfter = Math.round(payload.readInt32LE(i + 6) / 65536);
+        const killerType = payload[i + 10];
+        const killerId   = payload[i + 11]; // player slot (OBJ_PLAYER=4) or robot/weapon id
+        const damageType = payload[i + 12];
+        const sourceId   = payload[i + 13]; // actual weapon ID
+        i += 14;
+
+        // Accumulate hit into per-victim damage log — snapshot taken on KILL_HOST
+        if (!game._damageLog) game._damageLog = initDamageLog();
+        if (!game._damageLog[dmgVictim]) game._damageLog[dmgVictim] = [];
+        game._damageLog[dmgVictim].push({
+          killerId:    killerType === 4 ? killerId : null,
+          killerType,
+          sourceId,
+          damageType,
+          damage:      dmgAmount,
+          shieldsAfter,
+          ts:          Date.now(),
+        });
+
+      } else if (type === 43) {
         // MULTI_KILL_HOST — 7 bytes
         // [43][killed_pnum][killer_objnum int16LE][killer_net][team_vector][bounty_target]
-        // killer_objnum == -1 means environment kill or suicide
+        // killer_net (byte[4]) is unreliable for weapon kills — the weapon object that
+        // stored the owner mapping may already be freed by the time multi_send_kill runs.
+        // Primary attribution source is MULTI_DAMAGE (damage_context), which arrives
+        // just before the kill and carries killer_type + killer_id directly.
         if (payload.length - i < 7) break;
         const killedPnum   = payload[i + 1];
-        const killerObjnum = payload.readInt16LE(i + 2); // -1 = env kill / suicide
-        const killerNet    = payload[i + 4]; // player slot 0–7
+        const killerObjnum = payload.readInt16LE(i + 2);
+        const killerNet    = payload[i + 4]; // fallback only
+        console.log(`   🔬 KILL_HOST raw: killed=${killedPnum} objnum=${killerObjnum} killerNet=${killerNet}(0x${killerNet.toString(16)}) sender=${senderNum} bytes=[${Array.from(payload.slice(i,i+7)).join(',')}]`);
         i += 7;
 
-        const killerName = getPlayerName(killerNet);
-        const killedName = getPlayerName(killedPnum);
-        // Suicide: same slot, or no distinct killer object (env/self)
-        const isSuicide  = killerObjnum === -1 || killerNet === killedPnum;
+        // ── Snapshot damage log for this victim ─────────────────────────
+        if (!game._damageLog) game._damageLog = initDamageLog();
+        const damageLog = (game._damageLog[killedPnum] || []).slice();
+        game._damageLog[killedPnum] = []; // clear for next life
 
-        const killEvent = {
-          type: 'kill',
-          time: gameTime,
-          timestamp,
-          killer: killerName,
-          killerNum: killerNet,
-          killed: killedName,
-          killedNum: killedPnum,
-          weapon: 'Unknown',
-        };
+        // ── Killer attribution (damage log is primary) ────────────────────
+        // Walk backwards through damage log for last OBJ_PLAYER=4 hit — this
+        // is reliable even when killerNet=0xFF (weapon object already freed).
+        const OBJ_PLAYER = 4;
+        let effectiveKiller, isEnvKill, isSuicide, lastPlayerHit;
 
-        events.killFeed.unshift(killEvent);
-        events.timeline.push(killEvent);
-        if (events.killFeed.length > 100) events.killFeed.pop();
-        if (events.timeline.length > 500) events.timeline.shift();
+        for (let k = damageLog.length - 1; k >= 0; k--) {
+          if (damageLog[k].killerType === OBJ_PLAYER) { lastPlayerHit = damageLog[k]; break; }
+        }
 
-        // Update player stats
-        const killer = players[killerNet];
-        const killed = players[killedPnum];
-        if (killer && killed) {
-          if (isSuicide) {
-            killer.suicides = (killer.suicides || 0) + 1;
-            killer.deaths   = (killer.deaths   || 0) + 1;
-          } else {
-            killer.kills  = (killer.kills  || 0) + 1;
-            killed.deaths = (killed.deaths || 0) + 1;
+        if (lastPlayerHit) {
+          effectiveKiller = lastPlayerHit.killerId;
+          isEnvKill       = false;
+          isSuicide       = effectiveKiller === killedPnum;
+        } else if (killerNet !== 0xFF) {
+          // killerNet valid — collision/env with a named player
+          effectiveKiller = killerNet;
+          isEnvKill       = false;
+          isSuicide       = effectiveKiller === killedPnum;
+        } else {
+          // No player in damage log and killerNet=0xFF → environment kill
+          effectiveKiller = -1;
+          isEnvKill       = true;
+          isSuicide       = false;
+        }
+
+        // Killing weapon: last hit by a player or weapon object
+        let lastWeaponHit = null;
+        for (let k = damageLog.length - 1; k >= 0; k--) {
+          if (damageLog[k].killerType === OBJ_PLAYER || damageLog[k].killerType === 5) {
+            lastWeaponHit = damageLog[k]; break;
           }
         }
 
-        console.log(`   💀 Kill: ${killerName} ${isSuicide ? 'died' : '→ ' + killedName} @ ${gameTime}s`);
+        const killedName = getPlayerName(killedPnum);
+        const killerName = isEnvKill ? 'Environment' : getPlayerName(effectiveKiller);
+        const weapon = lastWeaponHit ? describeDamage(lastWeaponHit) : describeDamage(damageLog[damageLog.length - 1] || null);
+
+        // Build per-attacker breakdown from the full damage log
+        const killerBreakdown = buildKillerBreakdown(damageLog, getPlayerName);
+        const totalDamage = damageLog.reduce((s, h) => h.damageType !== 6 ? s + h.damage : s, 0);
+
+        // ── Dedup: game sends KILL_HOST via two code paths for client kills ──
+        // First packet often arrives before damage context (→ env kill).
+        // Second packet arrives with context (→ attributed kill).
+        // Strategy: if a kill for this victim was recorded within 1 s:
+        //   • previous was env + this is attributed → upgrade event in-place
+        //   • otherwise → discard duplicate
+        if (!game._recentKills) game._recentKills = {};
+        const KILL_DEDUP_MS = 300; // MDATA + bare duplicate typically arrives within ~100ms
+        const nowMs = Date.now();
+        const prevKill = game._recentKills[killedPnum];
+
+        if (prevKill && (nowMs - prevKill.time) < KILL_DEDUP_MS) {
+          if (!isEnvKill && prevKill.isEnvKill) {
+            // Upgrade the existing env kill event in-place (killFeed/timeline hold the same object)
+            const ev = prevKill.event;
+            ev.killer          = killerName;
+            ev.killerNum       = effectiveKiller;
+            ev.weapon          = weapon;
+            ev.isEnvKill       = false;
+            ev.isSuicide       = isSuicide;
+            ev.damageLog       = damageLog;
+            ev.killerBreakdown = killerBreakdown;
+            ev.totalDamage     = totalDamage;
+            prevKill.isEnvKill = false;
+            // Repair stats: undo the env death counted on first packet, apply real kill
+            const killed2 = players[killedPnum];
+            if (killed2) killed2.deaths = Math.max(0, (killed2.deaths || 1) - 1); // will be re-added below
+            const killer2 = players[effectiveKiller];
+            if (!isSuicide && killer2 && killed2) {
+              killer2.kills  = (killer2.kills  || 0) + 1;
+              killed2.deaths = (killed2.deaths || 0) + 1;
+            } else if (isSuicide && killer2 && killed2) {
+              killer2.suicides = (killer2.suicides || 0) + 1;
+              killer2.deaths   = (killer2.deaths   || 0) + 1;
+            }
+            const weaponLabel2 = weapon ?? '?';
+            console.log(`   🔁 Upgraded env→attributed: ${killerName} → ${killedName} (${weaponLabel2}) @ ${gameTime}s  [${damageLog.length} hits, total=${totalDamage}]`);
+          } else {
+            console.log(`   🔁 Dup KILL_HOST for ${killedName} — discarded`);
+          }
+        } else {
+          // Normal path — new kill event
+          const killEvent = {
+            type: 'kill',
+            time: gameTime,
+            timestamp,
+            killer: killerName,
+            killerNum: isEnvKill ? -1 : effectiveKiller,
+            killed: killedName,
+            killedNum: killedPnum,
+            weapon,
+            isEnvKill,
+            isSuicide,
+            damageLog,
+            killerBreakdown,
+            totalDamage,
+          };
+
+          game._recentKills[killedPnum] = { time: nowMs, event: killEvent, isEnvKill };
+
+          events.killFeed.unshift(killEvent);
+          events.timeline.push(killEvent);
+          if (events.killFeed.length > 100) events.killFeed.pop();
+          if (events.timeline.length > 500) events.timeline.shift();
+
+          // Update player stats
+          const killer = players[effectiveKiller];
+          const killed = players[killedPnum];
+          if (isEnvKill) {
+            if (killed) killed.deaths = (killed.deaths || 0) + 1;
+          } else if (killer && killed) {
+            if (isSuicide) {
+              killer.suicides = (killer.suicides || 0) + 1;
+              killer.deaths   = (killer.deaths   || 0) + 1;
+            } else {
+              killer.kills  = (killer.kills  || 0) + 1;
+              killed.deaths = (killed.deaths || 0) + 1;
+            }
+          }
+
+          const weaponLabel = weapon ?? '?';
+          const logLabel = isEnvKill ? `${killedName} died (${weaponLabel})` : isSuicide ? `${killedName} died (${weaponLabel})` : `${killerName} → ${killedName} (${weaponLabel})`;
+          console.log(`   💀 Kill: ${logLabel} @ ${gameTime}s  [${damageLog.length} dmg hits, total=${totalDamage}]`);
+        }
+
+      } else if (type === 44) {
+        // MULTI_KILL_CLIENT — 5 bytes: [44][killed][killer_objnum int16LE][killer_net]
+        if (payload.length - i < 5) break;
+        const kcKilled = payload[i + 1];
+        const kcKillerNet = payload[i + 4];
+        console.log(`   📨 KILL_CLIENT: killed=${kcKilled} killerNet=${kcKillerNet}(0x${kcKillerNet.toString(16)}) sender=${senderNum} bytes=[${Array.from(payload.slice(i,i+5)).join(',')}]`);
+        i += 5;
 
       } else if (type === 5) {
         // MULTI_MESSAGE — 37 bytes
@@ -553,7 +814,8 @@ function handleRegister(packet, rinfo) {
     players: [],
     confirmed: false,
     _broadcasted: false,
-    startTime: Date.now(), // Track when game started
+    startTime: Date.now(),
+    _damageLog: initDamageLog(),
   };
 
   g.id = key;
@@ -582,8 +844,12 @@ function handleRegister(packet, rinfo) {
     console.log(`    Game re-registered: ${key}`);
   }
 
-  // Immediately ask the game for details (opcode 4 → game responds with opcode 5)
-  sendGameInfoLiteReq(g);
+  // Send ACK first — DXX-Redux won't respond to LITE_REQ until it receives ACK.
+  sendRegisterAck(g);
+
+  // Then ask the game for details (opcode 4 → game responds with opcode 5)
+  // Small delay so the ACK lands before the LITE_REQ
+  setTimeout(() => sendGameInfoLiteReq(g), 100);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -601,10 +867,18 @@ function sendGameInfoLiteReq(g) {
   buf.writeUInt16LE(g.releaseMinor, o); o += 2;
   buf.writeUInt16LE(g.releaseMicro, o);
 
-  server.send(buf, g.port, g.ip, (err) => {
+  // Send to registerPort (the NAT-observed source port from the REGISTER
+  // packet), not g.port (the client's self-declared port). For any host
+  // without a forwarded port, those differ - the router only opened a NAT
+  // hole for the address it actually saw traffic go out to/from, so a probe
+  // to the declared port vanishes and the game never gets confirmed.
+  // Falls back to g.port for games restored from disk on startup, which
+  // don't have a registerPort yet until they next re-register.
+  const destPort = g.registerPort || g.port;
+  server.send(buf, destPort, g.ip, (err) => {
     if (err) console.error(`   ❌ game_info_lite_req error: ${err.message}`);
     else {
-      console.log(`    Sent game_info_lite_req to ${g.ip}:${g.port}`);
+      console.log(`    Sent game_info_lite_req to ${g.ip}:${destPort}`);
       g.pendingInfoReqs++;
     }
   });
@@ -629,10 +903,12 @@ function sendGameInfoFullReq(g) {
   buf.writeUInt16LE(g.releaseMicro, o); o += 2;
   buf.writeUInt16LE(proto, o);
 
-  server.send(buf, g.port, g.ip, (err) => {
+  // See comment in sendGameInfoLiteReq - must use the NAT-observed port.
+  const destPort = g.registerPort || g.port;
+  server.send(buf, destPort, g.ip, (err) => {
     if (err) console.error(`   ❌ game_info_full_req error: ${err.message}`);
     else {
-      console.log(`    Sent game_info_full_req (proto=${proto}) to ${g.ip}:${g.port}`);
+      console.log(`    Sent game_info_full_req (proto=${proto}) to ${g.ip}:${destPort}`);
       g.pendingInfoReqs++;
     }
   });
@@ -708,10 +984,9 @@ function handleGameInfoResponse(packet, rinfo) {
     return;
   }
 
-  // First confirmation? Send the register ACK now.
+  // First confirmation?
   if (!g.confirmed) {
     g.confirmed = true;
-    sendRegisterAck(g);
 
     console.log(`\n GAME CONFIRMED:`);
     console.log(`   "${g.gameName}" on "${g.mission}"`);
@@ -1110,6 +1385,9 @@ function writeGamelistFile() {
     if (!g.confirmed) continue;
     games.push({
       id: g.id,
+      ip: g.ip || '',
+      port: g.port || 0,
+      registerPort: g.registerPort || g.port || 0,
       gameName: g.gameName || '',
       mission: g.mission || '',
       level: g.level || 0,
@@ -1121,6 +1399,7 @@ function writeGamelistFile() {
       status: g.status || 0,
       timestamp: g.timestamp || new Date().toISOString(),
       lastSeen: g.lastSeen || Date.now(),
+      lastActivity: g.lastActivity || null,
       players: (g.players || []).map(p => ({
         name: p.name || '',
         connected: p.connected || false,
@@ -1339,6 +1618,8 @@ function cleanupDeadGames() {
   const now = Date.now();
   const dead = [];
   for (const [id, g] of activeGames) {
+    // If the game sent an MDATA packet recently it is actively live — never clean it up
+    if (g.lastActivity && now - g.lastActivity < CONFIG.gameTimeout) continue;
     if (now - g.lastSeen > CONFIG.gameTimeout) dead.push(id);
   }
   if (dead.length) {
@@ -1574,6 +1855,69 @@ function startHTTPServer() {
 }
 
 // ── Main ────────────────────────────────────────────────────────
+// ── Restore game state from last live-games.json on startup ─────
+// Prevents tracker restarts from wiping the active game list.
+// Restored games are marked confirmed with lastSeen = now so they
+// survive the first cleanup cycle. The poll loop will re-verify or
+// clean them up within gameTimeout (5 min) if the game is gone.
+function restoreStateFromDisk() {
+  try {
+    if (!fs.existsSync(CONFIG.liveGamesFile)) return;
+    const raw = fs.readFileSync(CONFIG.liveGamesFile, 'utf8');
+    const data = JSON.parse(raw);
+    if (!data.games || !data.games.length) return;
+
+    const now = Date.now();
+    let restored = 0;
+    for (const g of data.games) {
+      if (!g.id || !g.ip || !g.port) continue;
+      // Only restore games seen recently (within 2× gameTimeout)
+      if (g.lastSeen && now - g.lastSeen > CONFIG.gameTimeout * 2) continue;
+      if (activeGames.has(g.id)) continue;
+
+      activeGames.set(g.id, {
+        ...g,
+        confirmed: true,
+        lastSeen: now,            // Reset so cleanup doesn't kill it immediately
+        lastActivity: g.lastActivity || null,  // Preserve if game was live
+        _broadcasted: true,
+        _restored: true,      // Flag so we know to re-verify ASAP
+        pendingInfoReqs: 0,
+        players: g.players || [],
+        killMatrix: g.killMatrix || null,
+      });
+
+      if (g.killFeed || g.chat) {
+        // Rebuild timeline from restored kill feed so the frontend doesn't
+        // show an empty Timeline tab after a tracker restart.
+        const restoredKillFeed = g.killFeed || [];
+        const restoredTimeline = restoredKillFeed.slice().reverse().map(k => {
+          const isSuicide = k.killerNum !== undefined && k.killedNum !== undefined
+            ? k.killerNum === k.killedNum
+            : k.killer === (k.killed || k.victim);
+          return {
+            type: 'kill',
+            time: k.time || '',
+            description: k.message || (isSuicide
+              ? `${k.killed || k.victim} died`
+              : `${k.killer} killed ${k.killed || k.victim}`),
+          };
+        });
+        gameEvents.set(g.id, {
+          killFeed: restoredKillFeed,
+          chat: g.chat || [],
+          timeline: restoredTimeline,
+          startTime: g.lastSeen || now,
+        });
+      }
+      restored++;
+    }
+    if (restored > 0) console.log(`♻️  Restored ${restored} game(s) from disk`);
+  } catch (err) {
+    // Non-critical — start fresh
+  }
+}
+
 function main() {
   console.log('╔═══════════════════════════════════════════════════════════╗');
   console.log('║   DXX-Redux/Rebirth Game Tracker v3.1                     ║');
@@ -1582,12 +1926,17 @@ function main() {
 
   ensureEventsDir();
   firebase.init();
-  startUDPServer();
-  startWebSocketServer();
-  startHTTPServer();
-  setInterval(cleanupDeadGames, CONFIG.cleanupInterval);
-  setInterval(pollActiveGames, CONFIG.pollInterval);
-  writeGamelistFile(); // Write initial (empty) file immediately
+  restoreStateFromDisk();   // ← Restore before writing empty file
+
+  // Free any stale port holders before binding, then start servers
+  freePorts(() => {
+    startUDPServer();
+    startWebSocketServer();
+    startHTTPServer();
+    setInterval(cleanupDeadGames, CONFIG.cleanupInterval);
+    setInterval(pollActiveGames, CONFIG.pollInterval);
+    writeGamelistFile(); // Write restored state immediately
+  });
 
   console.log(`\n Steam launch options for DXX-Redux:`);
   console.log(`   -tracker_hostaddr <YOUR_IP> -tracker_hostport ${CONFIG.udpPort}`);

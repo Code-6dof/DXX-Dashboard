@@ -14,6 +14,8 @@
   const POLL_INTERVAL = 5000; // 5 seconds, same as PyTracker
   const RECENT_GAMES_HOURS = 24; // Show games from past 24 hours
   const RECENT_GAMES_API_LIMIT = 100; // Load this many games to filter from
+  const RECENT_GAMES_FIREBASE_URL = `/api/firebase/games?limit=${RECENT_GAMES_API_LIMIT}`;
+  const RECENT_GAMES_ARCHIVE_URL = `/api/games?limit=${RECENT_GAMES_API_LIMIT}`;
 
   // ── State ──
   let activeGames = new Map();  // id → game
@@ -336,18 +338,28 @@
   }
 
   // ── Load Recent Games from API ──
-  async function loadRecentGames() {
+  async function fetchRecentGames(url) {
     try {
-      const resp = await fetch(`/api/games?limit=${RECENT_GAMES_API_LIMIT}`);
-      if (!resp.ok) return;
-      
+      const resp = await fetch(url);
+      if (!resp.ok) return [];
+
       const data = await resp.json();
-      persistedRecentGames = data.games || [];
-      recentGamesLoaded = true;
-      renderRecentGames();
+      return Array.isArray(data.games) ? data.games : [];
     } catch (e) {
-      console.warn('Failed to load recent games:', e);
+      console.warn(`Failed to load recent games from ${url}:`, e);
+      return [];
     }
+  }
+
+  async function loadRecentGames() {
+    const [firebaseGames, archivedGames] = await Promise.all([
+      fetchRecentGames(RECENT_GAMES_FIREBASE_URL),
+      fetchRecentGames(RECENT_GAMES_ARCHIVE_URL),
+    ]);
+
+    persistedRecentGames = [...firebaseGames, ...archivedGames];
+    recentGamesLoaded = true;
+    renderRecentGames();
   }
 
   // ── Start ──
@@ -371,3 +383,4 @@
     init();
   }
 })();
+

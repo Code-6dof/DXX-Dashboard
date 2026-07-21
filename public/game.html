@@ -28,7 +28,7 @@
   <main class="game-page" id="gamePage">
     <!-- Back link -->
     <div class="game-page-back">
-      <a href="live.html">← Back to Live Games</a>
+      <a href="index.html" id="backLink">← Back to Live Games</a>
     </div>
 
     <!-- Loading state -->
@@ -67,6 +67,8 @@
         <button class="gdm-tab" data-panel="killFeed">Kill Feed</button>
         <button class="gdm-tab" data-panel="killMatrix">Kill Matrix</button>
         <button class="gdm-tab active" data-panel="timeline">Timeline</button>
+        <button class="gdm-tab" data-panel="weapons">Weapons</button>
+        <button class="gdm-tab" data-panel="combat">Combat</button>
         <button class="gdm-tab" data-panel="damage">Damage</button>
         <button class="gdm-tab" data-panel="chat">Chat</button>
       </div>
@@ -86,6 +88,12 @@
       </div>
       <div class="gdm-panel" id="panel-chat">
         <div class="gdm-section" id="chatContent"></div>
+      </div>
+      <div class="gdm-panel" id="panel-weapons">
+        <div class="gdm-section" id="weaponsContent"></div>
+      </div>
+      <div class="gdm-panel" id="panel-combat">
+        <div class="gdm-section" id="combatContent"></div>
       </div>
     </div>
   </main>

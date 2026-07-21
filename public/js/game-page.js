@@ -13,15 +13,17 @@
   // ── Configuration ──
   const POLL_URL = 'data/live-games.json';
   const ARCHIVE_URL = 'data/games.json';
-  const POLL_INTERVAL = 15000; // 15s idle refresh
+  const POLL_INTERVAL = 5000;  // 5s — match tracker write cadence
+  const LIVE_MISS_GRACE = 6;   // retries before falling back to archive (6 × 5s = 30s)
 
   // ── State ──
   const gameId = new URLSearchParams(window.location.search).get('id');
   let currentGame = null;
   let pollTimer = null;
   let missedPolls = 0; // track how many polls without finding the game
-  const MAX_MISSED = 12; // 12 × 3s = 36s before showing "not found"
+  const MAX_MISSED = 12; // kept for archive fallback path
   let isArchiveGame = false; // flag to distinguish archive vs live
+  const openPanelIds = new Set(); // kill feed panels kept open across re-renders
 
   // ── DOM Elements ──
   const loadingEl   = document.getElementById('gameLoading');
@@ -35,6 +37,8 @@
   const timelineEl  = document.getElementById('timelineContent');
   const damageEl    = document.getElementById('damageContent');
   const chatEl      = document.getElementById('chatContent');
+  const weaponsEl   = document.getElementById('weaponsContent');
+  const combatEl    = document.getElementById('combatContent');
   const tabsEl      = document.getElementById('gameTabs');
 
   // ── Utility ──
@@ -50,6 +54,38 @@
       year: 'numeric', month: 'short', day: 'numeric',
       hour: '2-digit', minute: '2-digit',
     });
+  }
+
+  // ── Weapon token icons ──────────────────────────────────────────
+  const WEAPON_ICONS = {
+    'Laser':              'tokens/laser.webp',
+    'Vulcan Cannon':      'tokens/vulcan.webp',
+    'Spreadfire (X)':     'tokens/spreadfire.webp',
+    'Spreadfire':         'tokens/spreadfire.webp',
+    'Plasma Cannon':      'tokens/plasma.webp',
+    'Fusion Cannon':      'tokens/fusion.webp',
+    'Concussion Missile': 'tokens/concussion.webp',
+    'Homing Missile':     'tokens/homer.webp',
+    'Proximity Bomb':     'tokens/pbomb.webp',
+    'Smart Missile':      'tokens/smissile.webp',
+    'Smart Blob':         'tokens/smissile.webp',
+    'Mega Missile':       'tokens/mmissile.webp',
+    'Earthshaker Missile':   'tokens/earthshaker.webp',
+    'Flash Missile':           'tokens/flash.webp',
+    'Helix Missile':           'tokens/helix.webp',
+    'Reactor':             'tokens/reactor.webp',
+    'Omega Cannon':           'tokens/omega.webp',
+    'Super Laser':             'tokens/superlaser.webp',
+    'Lava':                    'tokens/lava03d2.webp',
+    'Mercury Missile':                 'tokens/mercury.webp',
+    'Pheonix Cannon':                'tokens/pheonix.webp',
+    'Guass':                    'tokens/gauss.webp',
+  };
+  function weaponIcon(name, size) {
+    const src = WEAPON_ICONS[name];
+    if (!src) return '';
+    const s = size || 20;
+    return `<img src="${src}" alt="" class="wi" height="${s}" style="image-rendering:pixelated;vertical-align:middle;margin-right:4px;width:auto;max-width:${s * 3}px">`;
   }
 
   // ── Validate ──
@@ -112,6 +148,10 @@
 
       isArchiveGame = true;
       currentGame = data.game;
+
+      // Update back link to go to archive instead of live
+      const backLink = document.getElementById('backLink');
+      if (backLink) { backLink.href = 'live.html'; backLink.textContent = '← Back to Archive'; }
       
       // Firebase games have events embedded; archive games need event file fetch
       if (fromFirebase && data.game.events) {
@@ -191,19 +231,29 @@
 
       if (!game) {
         missedPolls++;
-        // Try archive immediately on first miss if we haven't loaded currentGame yet
-        if (missedPolls === 1 && !currentGame) {
-          console.log('Game not in live-games, trying archive...');
-          clearInterval(pollTimer);
-          await loadArchiveGame();
-        } else if (missedPolls >= MAX_MISSED && !currentGame) {
-          // Fallback: if archive also failed after multiple attempts
-          console.warn('Game not found in live-games or archive');
-          loadingEl.style.display = 'none';
-          notFoundEl.style.display = 'block';
-          contentEl.style.display = 'none';
-          clearInterval(pollTimer);
+
+        if (currentGame && !isArchiveGame) {
+          // We already have a live game rendered — keep showing it silently
+          // until we exceed the grace period, in case the tracker just restarted
+          if (missedPolls < LIVE_MISS_GRACE) {
+            console.log(`Game not in live poll (miss ${missedPolls}/${LIVE_MISS_GRACE}), retrying…`);
+            return;
+          }
+          // Grace period exhausted — fall through to archive
         }
+
+        // First miss with no game loaded yet — give it a few retries before
+        // jumping to the archive, since the tracker file may be momentarily stale
+        if (!currentGame && missedPolls < LIVE_MISS_GRACE) {
+          console.log(`Game not in live poll (miss ${missedPolls}/${LIVE_MISS_GRACE}), retrying…`);
+          loadingMessage.textContent = `Waiting for live game… (${missedPolls}/${LIVE_MISS_GRACE})`;
+          return;
+        }
+
+        // Exceeded grace — try archive
+        console.log('Game not in live-games after grace period, trying archive...');
+        clearInterval(pollTimer);
+        await loadArchiveGame();
         return;
       }
 
@@ -237,8 +287,8 @@
     const title = game.gameName || game.mission || 'Unknown Map';
     document.title = `${title} — DXX Tracker`;
 
-    // Sort players by kills
-    const players = [...(game.players || [])].sort((a, b) => (b.kills || 0) - (a.kills || 0));
+    // Sort players by kills (preserve slot index for kill-event matching)
+    const players = [...(game.players || [])].map((p, i) => ({ ...p, slotIndex: i })).sort((a, b) => (b.kills || 0) - (a.kills || 0));
     const gameType = players.length === 2 ? '1v1' : 'ffa';
 
     // Header
@@ -259,6 +309,7 @@
       } else {
         displayNames[i] = p.name;
       }
+      p.displayName = displayNames[i];
     });
 
     // Normalize killMatrix: convert array format [i][j] to object {displayName: {displayName: count}}
@@ -328,7 +379,9 @@
     const hasTimeline = timeline.length > 0;
     const hasDamage = game.damageBreakdown && game.damageBreakdown.length > 0;
     const hasChat = game.chatLog && game.chatLog.length > 0;
-    const hasAnyEvents = hasKillFeed || hasMatrix || hasTimeline || hasDamage || hasChat;
+    const hasWeapons = killFeed.length > 0;   // show if any kills recorded
+    const hasCombat  = killFeed.length > 0;   // always show progression if kills exist
+    const hasAnyEvents = hasKillFeed || hasMatrix || hasTimeline || hasDamage || hasChat || hasWeapons || hasCombat;
 
     if (hasAnyEvents) {
       tabsEl.style.display = 'flex';
@@ -341,6 +394,8 @@
         else if (panel === 'timeline' && !hasTimeline) tab.style.display = 'none';
         else if (panel === 'damage' && !hasDamage) tab.style.display = 'none';
         else if (panel === 'chat' && !hasChat) tab.style.display = 'none';
+        else if (panel === 'weapons' && !hasWeapons) tab.style.display = 'none';
+        else if (panel === 'combat' && !hasCombat) tab.style.display = 'none';
         else tab.style.display = '';
       });
 
@@ -358,10 +413,13 @@
       }
 
       killFeedEl.innerHTML = renderKillFeed(killFeed);
+      restoreOpenPanels();
       killMatrixEl.innerHTML = renderKillMatrix(killMatrix || {}, players);
       timelineEl.innerHTML = renderTimeline(timeline);
       damageEl.innerHTML = renderDamageBreakdown(game.damageBreakdown || [], players);
       chatEl.innerHTML = renderChatLog(game.chatLog || []);
+      weaponsEl.innerHTML = renderWeaponsChart(killFeed);
+      combatEl.innerHTML  = renderCombatChart(killFeed, players);
     } else {
       tabsEl.style.display = 'none';
       const noEventMessage = isArchiveGame 
@@ -481,16 +539,32 @@
   }
 
   // ── Render: Kill Feed ──
+  // Format game-time seconds (float/string) as M:SS
+  function fmtTime(t) {
+    const secs = parseFloat(t);
+    if (isNaN(secs)) return String(t);
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }
+
   function renderKillFeed(killFeed) {
     if (!killFeed || killFeed.length === 0) {
       return '<p class="gdm-empty">No kills recorded.</p>';
     }
 
-    const items = killFeed.map((k, idx) => {
+    // Sort newest-first (descending): most recent kill at top, oldest at bottom
+    const sorted = [...killFeed].sort((a, b) => {
+      const ta = a.time !== undefined ? parseFloat(a.time) : -Infinity;
+      const tb = b.time !== undefined ? parseFloat(b.time) : -Infinity;
+      return tb - ta;
+    });
+
+    const items = sorted.map((k, idx) => {
       // Handle both old format (k.time as string) and new format (k.time as game seconds)
       let timeStr;
-      if (k.time) {
-        timeStr = `<span class="kf-time">${esc(k.time)}s</span>`;
+      if (k.time !== undefined && k.time !== '') {
+        timeStr = `<span class="kf-time">${fmtTime(k.time)}</span>`;
       } else {
         timeStr = `<span class="kf-time">#${idx + 1}</span>`;
       }
@@ -513,13 +587,35 @@
       } else {
         message = `${killer} → ${victim}`;
       }
-      
+
+      // Damage breakdown — open by default, click to collapse
+      const hasDmg = k.killerBreakdown && k.killerBreakdown.length > 0;
+      const dmgId = `kf-dmg-${idx}`;
+      let dmgHtml = '';
+      if (hasDmg) {
+        const rows = k.killerBreakdown.map(attacker => {
+          const weaponList = attacker.weapons.map(w =>
+            `<span class="kf-dmg-weapon">${weaponIcon(w.name, 14)}${esc(w.name)} <em>${w.damage} dmg · ${w.hits}h</em></span>`
+          ).join('');
+          return `<div class="kf-dmg-attacker">
+            <span class="kf-dmg-name">${esc(attacker.killerName)}</span>
+            <span class="kf-dmg-total">${attacker.totalDamage} dmg · ${attacker.hits} hits</span>
+            <div class="kf-dmg-weapons">${weaponList}</div>
+          </div>`;
+        }).join('');
+        dmgHtml = `<div class="kf-dmg-panel" id="${dmgId}">${rows}</div>`;
+      }
+
+      const expandAttr = hasDmg ? `data-dmg="${dmgId}" title="Click to show damage breakdown"` : '';
+      const expandClass = hasDmg ? ' kf-has-dmg' : '';
+
       return `
-        <div class="kf-entry ${killClass}">
+        <div class="kf-entry ${killClass}${expandClass}" ${expandAttr}>
           ${timeStr}
           <span class="kf-msg">${esc(message)}</span>
           ${k.method || k.weapon ? `<span class="kf-method">${esc(k.method || k.weapon)}</span>` : ''}
-        </div>`;
+        </div>
+        ${dmgHtml}`;
     }).join('');
 
     return `
@@ -576,8 +672,14 @@
       return '<p class="gdm-empty">No timeline events.</p>';
     }
 
-    const items = timeline.map((evt, idx) => {
-      const timeStr = evt.time ? `${evt.time}s` : `#${idx + 1}`;
+    // Sort chronologically: timed events ascending, untimed at end
+    const sorted = [...timeline].sort((a, b) => {
+      const ta = a.time !== undefined && a.time !== '' ? parseFloat(a.time) : Infinity;
+      const tb = b.time !== undefined && b.time !== '' ? parseFloat(b.time) : Infinity;
+      return ta - tb;
+    });
+    const items = sorted.map((evt, idx) => {
+      const timeStr = evt.time !== undefined && evt.time !== '' ? fmtTime(evt.time) : `#${idx + 1}`;
       
       let typeClass, icon, desc;
       
@@ -699,6 +801,183 @@
       <div class="gdm-damage-bars">${weaponRows}</div>`;
   }
 
+  // ── Render: Weapons Chart ──
+  function renderWeaponsChart(killFeed) {
+    if (!killFeed || killFeed.length === 0) return '<p class="gdm-empty">No kill data.</p>';
+
+    const weaponCounts = {};
+    killFeed.forEach(k => {
+      if (k.isEnvKill) return;
+      const w = k.weapon || 'Unknown';
+      weaponCounts[w] = (weaponCounts[w] || 0) + 1;
+    });
+
+    const playerKillCount = killFeed.filter(k => !k.isEnvKill).length;
+    const envKills        = killFeed.filter(k => k.isEnvKill).length;
+    const entries = Object.entries(weaponCounts).sort((a, b) => b[1] - a[1]);
+    const max     = entries.length ? entries[0][1] : 1;
+
+    const bars = entries.map(([name, count]) => {
+      const pct   = max > 0 ? (count / max * 100).toFixed(1) : 0;
+      const share = playerKillCount > 0 ? (count / playerKillCount * 100).toFixed(0) : 0;
+      return `
+        <div class="wc-row">
+          <span class="wc-name">${weaponIcon(name, 20)}${esc(name)}</span>
+          <div class="wc-bar-track"><div class="wc-bar-fill" style="width:${pct}%"></div></div>
+          <span class="wc-count">${count}</span>
+          <span class="wc-share">${share}%</span>
+        </div>`;
+    }).join('');
+
+    const killerTotals = {};
+    killFeed.forEach(k => {
+      if (k.isEnvKill || !k.killer) return;
+      killerTotals[k.killer] = (killerTotals[k.killer] || 0) + 1;
+    });
+    
+    const statPills = Object.entries(killerTotals)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, kills]) => `<span class="wc-stat-pill"><strong>${esc(name)}</strong> ${kills}K</span>`)
+      .join('');
+
+    return `
+      <div class="gdm-kill-feed-header">
+        <span>Kills by Weapon</span>
+        <span class="kf-count">${playerKillCount} player kills · ${envKills} env</span>
+      </div>
+      ${statPills ? `<div class="wc-stat-pills">${statPills}</div>` : ''}
+      <div class="wc-chart">${bars || '<p class="gdm-empty">All kills were environment kills.</p>'}</div>`;
+  }
+
+  // ── Render: Combat Chart ──
+  function renderCombatChart(killFeed, players) {
+    if (!killFeed || killFeed.length === 0) return '<p class="gdm-empty">No kill data.</p>';
+
+    // Descent player colors by color index (0-7) as assigned in-game
+    const DESCENT_COLORS = [
+      '#4488ff', // 0 Blue
+      '#ff3333', // 1 Red
+      '#00cc44', // 2 Green
+      '#ffdd00', // 3 Yellow
+      '#00cccc', // 4 Cyan
+      '#cc44ff', // 5 Purple
+      '#ff8800', // 6 Orange
+      '#dddddd', // 7 White
+    ];
+    // Fall back to position-based palette for players with no color set
+    const FALLBACK_COLORS = ['#4488ff','#ff3333','#00cc44','#ffdd00','#00cccc','#cc44ff','#ff8800','#dddddd'];
+    const getPlayerColor = (p, idx) => DESCENT_COLORS[p.color] ?? FALLBACK_COLORS[idx % FALLBACK_COLORS.length];
+
+    // Order by netgame slot (slotIndex = original game.players array position)
+    const slotOrderedPlayers = [...players].sort((a, b) => (a.slotIndex ?? 0) - (b.slotIndex ?? 0));
+
+    // Parse kill times and sort by time
+    const timedKills = killFeed
+      .filter(k => !k.isEnvKill && k.time !== undefined && k.killer)
+      .map(k => {
+        const t = typeof k.time === 'string' ? parseFloat(k.time) : k.time;
+        return { t, killer: k.killer, killerNum: k.killerNum };
+      })
+      .filter(k => typeof k.t === 'number' && !isNaN(k.t))
+      .sort((a, b) => a.t - b.t);
+
+    let svgHtml = '';
+    if (timedKills.length > 0 && slotOrderedPlayers.length > 0) {
+      const W = 600, H = 180;
+      const PAD = { top: 12, right: 15, bottom: 28, left: 30 };
+      const cW = W - PAD.left - PAD.right;
+      const cH = H - PAD.top  - PAD.bottom;
+      const maxT = Math.max(timedKills[timedKills.length - 1].t, 1);
+      const maxK = Math.max(...slotOrderedPlayers.map(p => p.kills || 0), 1);
+      const toX  = t => (PAD.left + (t / maxT) * cW).toFixed(1);
+      const toY  = k => (PAD.top  + cH - (k / (maxK + 0.5)) * cH).toFixed(1);
+
+      const grid = [];
+      const ySteps = Math.min(maxK, 5);
+      for (let i = 0; i <= ySteps; i++) {
+        const v = Math.round(i * maxK / ySteps);
+        const y = toY(v);
+        grid.push(`<line x1="${PAD.left}" x2="${PAD.left + cW}" y1="${y}" y2="${y}" stroke="rgba(255,255,255,0.07)" stroke-width="1"/>`);
+        grid.push(`<text x="${PAD.left - 4}" y="${y}" text-anchor="end" dominant-baseline="middle" class="cc-axis">${v}</text>`);
+      }
+      const xStep = maxT > 120 ? 60 : maxT > 60 ? 30 : 15;
+      for (let t = 0; t <= maxT; t += xStep) {
+        grid.push(`<text x="${toX(t)}" y="${PAD.top + cH + 16}" text-anchor="middle" class="cc-axis">${t}s</text>`);
+      }
+
+      const paths = slotOrderedPlayers.map((p, idx) => {
+        const color = getPlayerColor(p, idx);
+        let kills = 0;
+        const pts = [[0, 0]];
+        timedKills.forEach(k => {
+          // Prefer slot-number match (immune to dedup name suffixes); fall back to name
+          const matches = k.killerNum !== undefined ? k.killerNum === p.slotIndex : k.killer === p.name;
+          if (matches) {
+            pts.push([k.t, kills]);      // Before kill
+            kills++;
+            pts.push([k.t, kills]);      // After kill
+          }
+        });
+        pts.push([maxT, kills]);  // Extend line to end for all players
+        const d = pts.map(([t, k], i) => `${i === 0 ? 'M' : 'L'}${toX(t)} ${toY(k)}`).join(' ');
+        return `<path d="${d}" stroke="${color}" stroke-width="2.5" fill="none" stroke-linejoin="round"/>`;
+      });
+
+      const legend = slotOrderedPlayers.map((p, idx) => {
+        const color = getPlayerColor(p, idx);
+        return `<span class="cc-legend-item"><svg width="18" height="4" style="flex-shrink:0"><line x1="0" y1="2" x2="18" y2="2" stroke="${color}" stroke-width="2.5"/></svg>${esc(p.displayName || p.name)}</span>`;
+      }).join('');
+
+      svgHtml = `
+        <div class="cc-legend">${legend}</div>
+        <div class="cc-chart-wrap">
+          <svg viewBox="0 0 ${W} ${H}" class="cc-svg" preserveAspectRatio="xMidYMid meet">
+            ${grid.join('')}${paths.join('')}
+          </svg>
+        </div>`;
+    }
+
+    // Damage dealt / received aggregated from killerBreakdown
+    const dmgDealt   = {};
+    const dmgReceived= {};
+    slotOrderedPlayers.forEach(p => { dmgDealt[p.name] = 0; dmgReceived[p.name] = 0; });
+    killFeed.forEach(k => {
+      if (k.totalDamage && k.killed && dmgReceived[k.killed] !== undefined)
+        dmgReceived[k.killed] += k.totalDamage;
+      if (k.killerBreakdown)
+        k.killerBreakdown.forEach(b => { if (dmgDealt[b.killerName] !== undefined) dmgDealt[b.killerName] += b.totalDamage; });
+    });
+
+    const hasDmgData = slotOrderedPlayers.some(p => (dmgDealt[p.name] || 0) + (dmgReceived[p.name] || 0) > 0);
+    let dmgTable = '';
+    if (hasDmgData) {
+      const rows = [...slotOrderedPlayers]
+        .sort((a, b) => (dmgDealt[b.name] || 0) - (dmgDealt[a.name] || 0))
+        .map(p => {
+          const dealt = dmgDealt[p.name]    || 0;
+          const recv  = dmgReceived[p.name] || 0;
+          const ratio = recv > 0 ? (dealt / recv).toFixed(2) : dealt > 0 ? '∞' : '—';
+          return `<tr>
+            <td><strong>${esc(p.name)}</strong></td>
+            <td class="cc-dealt">${dealt}</td>
+            <td class="cc-recv">${recv}</td>
+            <td class="cc-ratio">${ratio}</td>
+          </tr>`;
+        }).join('');
+      dmgTable = `
+        <h4 class="cc-sub">Damage Summary</h4>
+        <table class="cc-dmg-table">
+          <thead><tr><th>Player</th><th>Dealt</th><th>Received</th><th>Ratio</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+    }
+
+    return `
+      <div class="gdm-kill-feed-header"><span>Kill Progression</span></div>
+      ${svgHtml}
+      ${dmgTable}`;
+  }
+
   // ── Render: Chat Log ──
   function renderChatLog(chatLog) {
     if (!chatLog || chatLog.length === 0) {
@@ -745,10 +1024,48 @@
     });
   }
 
+  // ── Restore open panels after kill feed re-render ──
+  function restoreOpenPanels() {
+    openPanelIds.forEach(id => {
+      const panel = document.getElementById(id);
+      if (!panel) return;
+      panel.classList.add('kf-dmg-open');
+      const entry = killFeedEl.querySelector(`[data-dmg="${id}"]`);
+      if (entry) {
+        entry.classList.add('kf-expanded');
+        entry.title = 'Damage breakdown';
+      }
+    });
+  }
+
+  // ── Kill feed click: toggle damage breakdown panel ──
+  function setupKillFeedClicks() {
+    killFeedEl.addEventListener('click', e => {
+      const entry = e.target.closest('.kf-has-dmg');
+      if (!entry) return;
+      const panelId = entry.dataset.dmg;
+      const panel = panelId ? document.getElementById(panelId) : null;
+      if (!panel) return;
+      const isOpen = panel.classList.contains('kf-dmg-open');
+      if (isOpen) {
+        panel.classList.remove('kf-dmg-open');
+        entry.classList.remove('kf-expanded');
+        entry.title = 'Click to show damage breakdown';
+        openPanelIds.delete(panelId);
+      } else {
+        panel.classList.add('kf-dmg-open');
+        entry.classList.add('kf-expanded');
+        entry.title = 'Click to hide damage breakdown';
+        openPanelIds.add(panelId);
+      }
+    });
+  }
+
   // ── Start ──
   function init() {
     console.log(`DXX Game Page v2.1 — Game ID: ${gameId}`);
     setupTabs();
+    setupKillFeedClicks();
     poll(); // First poll immediately
     pollTimer = setInterval(poll, POLL_INTERVAL);
   }
