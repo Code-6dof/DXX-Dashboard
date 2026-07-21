@@ -27,3 +27,9 @@ public/data/live-games.json
 public/data/games.json
 public/data/events/
 dxx-dashboard-firebase-adminsdk-*.json
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+!.env.example
