@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DXX Tracker</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/live.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+</head>
+<body class="live-tracker-body">
+  <!-- Navigation -->
+  <nav class="main-nav">
+    <div class="nav-inner">
+      <div class="nav-logo">
+        <img src="images/Extralife.gif" alt="DXX" class="logo-icon" style="height: 32px; width: auto;" />
+        <span>DXX Tracker</span>
+      </div>
+      <div class="nav-links">
+        <a href="index.html" class="nav-link active">Live Games</a>
+        <a href="live.html" class="nav-link">Game Archive</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Live Tracker Hero -->
+  <header class="live-hero">
+    <div class="live-hero-inner">
+      <div class="connection-status" id="connectionStatus">
+        <span class="status-dot"></span>
+        <span class="status-text">Connecting...</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Active Games Section -->
+  <section class="live-games-section">
+    <div class="section-header">
+      <h2>Active Games</h2>
+      <span class="game-count" id="activeGameCount">0 games</span>
+    </div>
+    <div id="activeGamesList" class="active-games-list">
+      <!-- Active games will be inserted here -->
+    </div>
+    <div id="noGamesMessage" class="no-games-message">
+      <div class="waiting-animation">
+        <div class="pulse-ring"></div>
+        <div class="pulse-ring delay-1"></div>
+        <div class="pulse-ring delay-2"></div>
+        <span class="waiting-icon"></span>
+      </div>
+      <h3>Waiting for games...</h3>
+      <p>Listening for Descent matches. Games will appear here when detected.</p>
+      <details class="setup-info">
+        <summary>How to enable game tracking</summary>
+        <ol>
+          <li>Launch DXX-Rebirth/Redux with steam/.ini flags: <code>-tracker_hostaddr tracker.dxxtracker.com -tracker_hostport 9999</code></li>
+          <li>Alternatively, use the direct IP: <code>-tracker_hostaddr 192.210.140.94 -tracker_hostport 9999</code></li>
+          <li>Start or join any multiplayer game — it will appear here within seconds!</li>
+        </ol>
+        <p style="margin-top: 0.5rem; font-size: 0.9rem; color: var(--text-dim);">
+          <strong>Note:</strong> Add the tracker flags to your Steam launch options or descent.ini line before starting DXX-Rebirth/Redux.
+        </p>
+      </details>
+    </div>
+  </section>
+
+  <!-- Recent Games (last 10) -->
+  <section class="recent-games-section">
+    <div class="section-header">
+      <h2>Recent Games</h2>
+      <span class="game-count" id="recentGameCount">0 games</span>
+    </div>
+    <div id="recentGamesList" class="recent-games-list">
+      <!-- Recent completed games -->
+    </div>
+  </section>
+
+  <footer>
+    <p>Some Data sourced from <a href="https://retro-tracker.game-server.cc/archive/full.html" target="_blank">Retro Tracker</a> by Arch/PuDLeZ. DXX Tracker Hosted/Created by Code</p>
+  </footer>
+
+  <script src="js/live-tracker.js"></script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+# Enable gzip compression for JSON files
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE application/json
+  AddOutputFilterByType DEFLATE text/html
+  AddOutputFilterByType DEFLATE text/css
+  AddOutputFilterByType DEFLATE application/javascript
+</IfModule>
+
+# Cache JSON for 1 hour (3600 seconds)
+<IfModule mod_expires.c>
+  ExpiresActive On
+  ExpiresByType application/json "access plus 1 hour"
+  ExpiresByType text/css "access plus 1 week"
+  ExpiresByType application/javascript "access plus 1 week"
+</IfModule>
+
+# Set proper MIME type for JSON
+<IfModule mod_mime.c>
+  AddType application/json .json
+</IfModule>

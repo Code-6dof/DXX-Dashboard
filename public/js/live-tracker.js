@@ -1,0 +1,386 @@
+/**
+ * DXX Live Tracker v3.0 — HTTP Polling
+ *
+ * Polls /data/live-games.json every 5 seconds, just like PyTracker
+ * writes gamelist.txt and the web_interface reads it.
+ *
+ * No WebSocket. No reconnection issues. No flicker.
+ */
+(function LiveTracker() {
+  'use strict';
+
+  // ── Configuration ──
+  const POLL_URL = '/data/live-games.json';
+  const POLL_INTERVAL = 5000; // 5 seconds, same as PyTracker
+  const RECENT_GAMES_HOURS = 24; // Show games from past 24 hours
+  const RECENT_GAMES_API_LIMIT = 100; // Load this many games to filter from
+  const RECENT_GAMES_FIREBASE_URL = `/api/firebase/games?limit=${RECENT_GAMES_API_LIMIT}`;
+  const RECENT_GAMES_ARCHIVE_URL = `/api/games?limit=${RECENT_GAMES_API_LIMIT}`;
+
+  // ── State ──
+  let activeGames = new Map();  // id → game
+  let recentGames = [];
+  let persistedRecentGames = []; // Loaded from API
+  let lastUpdated = null;
+  let pollTimer = null;
+  let knownGameIds = new Set(); // track games we've seen, to detect removals
+  let recentGamesLoaded = false; // Track if we've loaded from API
+
+  // ── DOM Elements ──
+  const statusEl      = document.getElementById('connectionStatus');
+  const activeListEl  = document.getElementById('activeGamesList');
+  const recentListEl  = document.getElementById('recentGamesList');
+  const noGamesEl     = document.getElementById('noGamesMessage');
+  const activeCountEl = document.getElementById('activeGameCount');
+  const recentCountEl = document.getElementById('recentGameCount');
+
+  // ── Utility ──
+  function esc(str) {
+    const d = document.createElement('div');
+    d.textContent = str || '';
+    return d.innerHTML;
+  }
+
+  function timeAgo(timestamp) {
+    const diff = Date.now() - new Date(timestamp).getTime();
+    const m = Math.floor(diff / 60000);
+    const h = Math.floor(diff / 3600000);
+    const d = Math.floor(diff / 86400000);
+    if (m < 1) return 'just now';
+    if (m < 60) return `${m}m ago`;
+    if (h < 24) return `${h}h ago`;
+    if (d < 7)  return `${d}d ago`;
+    return new Date(timestamp).toLocaleDateString();
+  }
+
+  // ── Poll Loop ──
+  async function poll() {
+    try {
+      const resp = await fetch(POLL_URL + '?t=' + Date.now()); // bust cache
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+      const data = await resp.json();
+
+      // Mark connected
+      statusEl.className = 'connection-status connected';
+      statusEl.querySelector('.status-text').textContent = 'Connected';
+
+      // Track which games are in this update
+      const incomingIds = new Set();
+
+      if (data.games && data.games.length > 0) {
+        for (const g of data.games) {
+          if (!g.id) continue;
+          incomingIds.add(g.id);
+          activeGames.set(g.id, g);
+        }
+      }
+
+      // Games that disappeared → move to recent
+      for (const oldId of knownGameIds) {
+        if (!incomingIds.has(oldId)) {
+          const removed = activeGames.get(oldId);
+          if (removed) {
+            activeGames.delete(oldId);
+            // Add to session recent games (will be combined with persisted in render)
+            const alreadyRecent = recentGames.some(g => g.id === removed.id);
+            if (!alreadyRecent) {
+              recentGames.unshift(removed);
+            }
+          }
+        }
+      }
+
+      // If incoming has zero games but we had games before, move them to recent
+      // BUT only if the file is actually empty and we got a successful response
+      if ((!data.games || data.games.length === 0) && knownGameIds.size > 0) {
+        for (const [id, g] of activeGames) {
+          const alreadyRecent = recentGames.some(rg => rg.id === g.id);
+          if (!alreadyRecent) {
+            recentGames.unshift(g);
+          }
+        }
+        activeGames.clear();
+      }
+
+      knownGameIds = incomingIds;
+      lastUpdated = data.updated || new Date().toISOString();
+
+      renderActiveGames();
+      renderRecentGames();
+
+    } catch (e) {
+      // File doesn't exist yet or server is down
+      statusEl.className = 'connection-status disconnected';
+      statusEl.querySelector('.status-text').textContent = 'Disconnected';
+    }
+  }
+
+  // ── Render Active Games (in-place DOM updates) ──
+  function renderActiveGames() {
+    activeCountEl.textContent = `${activeGames.size} ${activeGames.size === 1 ? 'game' : 'games'}`;
+
+    if (activeGames.size === 0) {
+      activeListEl.innerHTML = '';
+      noGamesEl.style.display = 'block';
+      return;
+    }
+
+    noGamesEl.style.display = 'none';
+
+    const sorted = Array.from(activeGames.values());
+
+    // Remove stale cards
+    const currentIds = new Set(sorted.map(g => g.id));
+    activeListEl.querySelectorAll('.active-game-card').forEach(card => {
+      if (!currentIds.has(card.dataset.gameId)) card.remove();
+    });
+
+    // Update or create cards
+    for (const game of sorted) {
+      const sel = `.active-game-card[data-game-id="${CSS.escape(game.id)}"]`;
+      const existing = activeListEl.querySelector(sel);
+      if (existing) {
+        updateCardInPlace(existing, game);
+      } else {
+        const div = document.createElement('div');
+        div.innerHTML = buildCardHTML(game);
+        const card = div.firstElementChild;
+        card.addEventListener('click', () => {
+          window.location.href = 'game.html?id=' + encodeURIComponent(game.id);
+        });
+        activeListEl.appendChild(card);
+      }
+    }
+  }
+
+  /** Patch existing card DOM without replacing it */
+  function updateCardInPlace(card, game) {
+    const players = game.players || [];
+    const sorted  = [...players].sort((a, b) => (b.kills || 0) - (a.kills || 0));
+
+    const title = card.querySelector('.game-card-title');
+    if (title) title.textContent = game.gameName || game.mission || 'Unknown Map';
+
+    const meta = card.querySelector('.game-card-meta');
+    if (meta) {
+      const mode = game.gameMode || 'Anarchy';
+      const duration = game.timeElapsed || '';
+      const metaItems = [
+        `<span class="game-card-meta-item">${esc(game.mission || 'Unknown Map')}</span>`,
+        `<span class="game-card-meta-item">${game.playerCount || players.length}/${game.maxPlayers || 8}</span>`,
+        `<span class="game-card-meta-item">${esc(mode)}</span>`,
+        duration ? `<span class="game-card-meta-item">${esc(duration)}</span>` : '',
+        game.host ? `<span class="game-card-meta-item">${esc(game.host)}:${game.port}</span>` : ''
+      ].filter(Boolean);
+      meta.innerHTML = metaItems.join('');
+    }
+
+    // Players
+    const playersEl = card.querySelector('.game-card-players');
+    if (playersEl) {
+      const rows = playersEl.querySelectorAll('.player-row');
+      if (rows.length !== sorted.length || sorted.length === 0) {
+        // Rebuild rows
+        playersEl.innerHTML = sorted.length > 0
+          ? sorted.map(p => `
+              <div class="player-row">
+                <span class="player-name">${esc(p.name)}</span>
+                <span class="player-stats">
+                  <span class="stat-kills">${p.kills || 0}K</span>
+                  <span class="stat-deaths">${p.deaths || 0}D</span>
+                  <span class="stat-suicides">${p.suicides || 0}S</span>
+                </span>
+              </div>`).join('')
+          : '<div class="player-row"><span class="player-name">Waiting for players…</span></div>';
+      } else {
+        rows.forEach((row, i) => {
+          const p = sorted[i];
+          if (!p) return;
+          const n = row.querySelector('.player-name');
+          if (n) n.textContent = p.name || '';
+          const k = row.querySelector('.stat-kills');
+          if (k) k.textContent = `${p.kills || 0}K`;
+          const d = row.querySelector('.stat-deaths');
+          if (d) d.textContent = `${p.deaths || 0}D`;
+          const s = row.querySelector('.stat-suicides');
+          if (s) s.textContent = `${p.suicides || 0}S`;
+        });
+      }
+    }
+
+    // Footer
+    const footer = card.querySelector('.game-card-footer');
+    if (footer) {
+      const kp = footer.querySelector('.kill-feed-preview');
+      if (kp) {
+        const ev = game.killFeed && game.killFeed.length > 0 ? game.killFeed[0] : null;
+        kp.textContent = ev
+          ? (ev.killer === ev.killed ? `${ev.killed} died (${ev.weapon || '?'})` : `${ev.killer} → ${ev.killed} (${ev.weapon || '?'})`)
+          : 'No kills yet';
+      }
+      const cp = footer.querySelector('.chat-preview');
+      if (cp) {
+        const lastChat = game.chat && game.chat.length > 0 ? game.chat[game.chat.length - 1] : null;
+        cp.textContent = lastChat ? `${lastChat.from}: ${lastChat.message}` : '';
+        cp.style.display = lastChat ? '' : 'none';
+      }
+      const summary = footer.querySelector('.game-stats-summary');
+      if (summary) {
+        summary.innerHTML = `
+          <span>${game.totalKills || 0} kills</span>
+          ${game.totalDeaths ? `<span>${game.totalDeaths} deaths</span>` : ''}`;
+      }
+    }
+  }
+
+  function buildCardHTML(game) {
+    const players = game.players || [];
+    const sorted  = [...players].sort((a, b) => (b.kills || 0) - (a.kills || 0));
+
+    const playerRows = sorted.length > 0
+      ? sorted.map(p => `
+          <div class="player-row">
+            <span class="player-name">${esc(p.name)}</span>
+            <span class="player-stats">
+              <span class="stat-kills">${p.kills || 0}K</span>
+              <span class="stat-deaths">${p.deaths || 0}D</span>
+              <span class="stat-suicides">${p.suicides || 0}S</span>
+            </span>
+          </div>`).join('')
+      : '<div class="player-row"><span class="player-name">Waiting for players…</span></div>';
+
+    const latestKill = game.killFeed && game.killFeed.length > 0 ? game.killFeed[0] : null;
+    const lastKill = latestKill
+      ? (latestKill.killer === latestKill.killed
+          ? `${latestKill.killed} died (${latestKill.weapon || '?'})`
+          : `${latestKill.killer} → ${latestKill.killed} (${latestKill.weapon || '?'})`)
+      : 'No kills yet';
+    const lastChat = game.chat && game.chat.length > 0 ? game.chat[game.chat.length - 1] : null;
+
+    const gameName = game.gameName || game.mission || 'Unknown Map';
+    const mode = game.gameMode || 'Anarchy';
+    const duration = game.timeElapsed || '';
+
+    return `
+      <div class="active-game-card" data-game-id="${esc(game.id)}">
+        <div class="game-card-header">
+          <div class="game-card-title">${esc(gameName)}</div>
+          <span class="live-badge">● LIVE</span>
+        </div>
+        <div class="game-card-meta">
+          <span class="game-card-meta-item">${esc(game.mission || 'Unknown Map')}</span>
+          <span class="game-card-meta-item">${game.playerCount || players.length}/${game.maxPlayers || 8}</span>
+          <span class="game-card-meta-item">${esc(mode)}</span>
+          ${duration ? `<span class="game-card-meta-item">${esc(duration)}</span>` : ''}
+          ${game.host ? `<span class="game-card-meta-item">${esc(game.host)}:${game.port}</span>` : ''}
+        </div>
+        <div class="game-card-players">
+          ${playerRows}
+        </div>
+        <div class="game-card-footer">
+          <span class="kill-feed-preview">${esc(lastKill)}</span>
+          ${lastChat ? `<span class="chat-preview" style="font-size:0.8rem;color:var(--text-dim);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(lastChat.from + ': ' + lastChat.message)}</span>` : '<span class="chat-preview" style="display:none"></span>'}
+          <span class="game-stats-summary">
+            <span>${game.totalKills || 0} kills</span>
+            ${game.totalDeaths ? `<span>${game.totalDeaths} deaths</span>` : ''}
+          </span>
+        </div>
+      </div>`;
+  }
+
+  // ── Render Recent Games ──
+  function renderRecentGames() {
+    // Combine in-session recent games with persisted ones, remove duplicates
+    const cutoff = Date.now() - (RECENT_GAMES_HOURS * 60 * 60 * 1000);
+    const allRecent = [...recentGames, ...persistedRecentGames];
+    
+    // Deduplicate by ID and filter by time
+    const seen = new Set();
+    const filtered = allRecent.filter(g => {
+      if (seen.has(g.id)) return false;
+      seen.add(g.id);
+      const gameTime = new Date(g.timestamp || g.startTime).getTime();
+      return gameTime >= cutoff;
+    });
+    
+    // Sort by timestamp, newest first
+    filtered.sort((a, b) => {
+      const aTime = new Date(a.timestamp || a.startTime).getTime();
+      const bTime = new Date(b.timestamp || b.startTime).getTime();
+      return bTime - aTime;
+    });
+
+    recentCountEl.textContent = `${filtered.length} ${filtered.length === 1 ? 'game' : 'games'}`;
+
+    if (filtered.length === 0) {
+      recentListEl.innerHTML = '<p style="text-align:center;color:var(--text-dim);padding:2rem">No games in the past 24 hours.</p>';
+      return;
+    }
+
+    recentListEl.innerHTML = filtered.map(g => {
+      const players = g.players || [];
+      const names = players.map(p => p.name).join(', ');
+      const trunc = names.length > 40 ? names.slice(0, 40) + '…' : names;
+      const timestamp = g.timestamp || g.startTime;
+      return `
+        <div class="recent-game-card" data-game-id="${esc(g.id)}" onclick="window.location.href='game.html?id=${encodeURIComponent(g.id)}'">
+          <div class="recent-game-time">${timeAgo(timestamp)}</div>
+          <div class="recent-game-info">
+            <div class="recent-game-map">${esc(g.mission || g.map || 'Unknown Map')}</div>
+            <div class="recent-game-players">${esc(trunc)}</div>
+          </div>
+          <div class="recent-game-stats">
+            ${g.totalKills || 0} kills • ${players.length} players
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  // ── Load Recent Games from API ──
+  async function fetchRecentGames(url) {
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) return [];
+
+      const data = await resp.json();
+      return Array.isArray(data.games) ? data.games : [];
+    } catch (e) {
+      console.warn(`Failed to load recent games from ${url}:`, e);
+      return [];
+    }
+  }
+
+  async function loadRecentGames() {
+    const [firebaseGames, archivedGames] = await Promise.all([
+      fetchRecentGames(RECENT_GAMES_FIREBASE_URL),
+      fetchRecentGames(RECENT_GAMES_ARCHIVE_URL),
+    ]);
+
+    persistedRecentGames = [...firebaseGames, ...archivedGames];
+    recentGamesLoaded = true;
+    renderRecentGames();
+  }
+
+  // ── Start ──
+  function init() {
+    console.log('DXX Live Tracker v3.0 (HTTP polling)');
+    loadRecentGames(); // Load recent games from API
+    poll(); // First poll immediately
+    pollTimer = setInterval(poll, POLL_INTERVAL);
+
+    // Update "time ago" labels periodically
+    setInterval(() => {
+      if (recentGames.length > 0 || persistedRecentGames.length > 0) {
+        renderRecentGames();
+      }
+    }, 30000);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+
